@@ -1,0 +1,220 @@
+name: Build OpenClaw VM (Optimized)
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 每天檢查
+  workflow_dispatch:
+
+jobs:
+  check-openclaw-update:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      image_digest: ${{ steps.check.outputs.digest }}
+    steps:
+      - name: Get latest OpenClaw Docker image
+        id: check
+        run: |
+          # 檢查官方鏡像是否有更新（使用社區鏡像）
+          LATEST_DIGEST=$(docker manifest inspect ghcr.io/phioranex/openclaw-docker:latest | jq -r .config.digest)
+          echo "digest=$LATEST_DIGEST" >> $GITHUB_OUTPUT
+          
+          # 檢查是否已經構建過這個版本
+          if gh release view "vm-${LATEST_DIGEST:7:12}" &>/dev/null; then
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  build-vm:
+    needs: check-openclaw-update
+    if: needs.check-openclaw-update.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant: [gui, headless]
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install QEMU tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-utils
+
+      - name: Pull official OpenClaw image
+        run: |
+          # 拉取官方預構建鏡像
+          docker pull ghcr.io/phioranex/openclaw-docker:latest
+          docker tag ghcr.io/phioranex/openclaw-docker:latest openclaw:latest
+
+      - name: Customize for ${{ matrix.variant }}
+        run: |
+          # 創建自定義 Dockerfile
+          if [ "${{ matrix.variant }}" = "gui" ]; then
+            cat > Dockerfile.custom << 'EOF'
+          FROM openclaw:latest
+          
+          USER root
+          
+          # 安裝 X11 和桌面環境
+          RUN apt-get update && \
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                xorg x11-apps \
+                xfce4 xfce4-terminal \
+                lightdm lightdm-gtk-greeter \
+                dbus-x11 \
+                grub-pc linux-image-amd64 && \
+              apt-get clean && \
+              rm -rf /var/lib/apt/lists/*
+          
+          # 配置服務
+          RUN systemctl enable lightdm || true
+          
+          # 創建啟動腳本
+          RUN echo '#!/bin/bash' > /usr/local/bin/start-openclaw && \
+              echo 'cd /app && node dist/index.js gateway --bind lan' >> /usr/local/bin/start-openclaw && \
+              chmod +x /usr/local/bin/start-openclaw
+          
+          # 創建桌面快捷方式
+          RUN mkdir -p /etc/skel/Desktop && \
+              echo '[Desktop Entry]' > /etc/skel/Desktop/OpenClaw.desktop && \
+              echo 'Type=Application' >> /etc/skel/Desktop/OpenClaw.desktop && \
+              echo 'Name=OpenClaw Gateway' >> /etc/skel/Desktop/OpenClaw.desktop && \
+              echo 'Exec=/usr/local/bin/start-openclaw' >> /etc/skel/Desktop/OpenClaw.desktop && \
+              echo 'Terminal=true' >> /etc/skel/Desktop/OpenClaw.desktop && \
+              chmod +x /etc/skel/Desktop/OpenClaw.desktop
+          
+          USER node
+          
+          CMD ["/sbin/init"]
+          EOF
+          
+          else
+            cat > Dockerfile.custom << 'EOF'
+          FROM openclaw:latest
+          
+          USER root
+          
+          # 安裝必要的系統包
+          RUN apt-get update && \
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                systemd systemd-sysv \
+                grub-pc linux-image-amd64 \
+                nginx && \
+              apt-get clean && \
+              rm -rf /var/lib/apt/lists/*
+          
+          # 配置 Nginx 作為 Web 前端
+          RUN echo 'server {' > /etc/nginx/sites-available/openclaw && \
+              echo '  listen 3000;' >> /etc/nginx/sites-available/openclaw && \
+              echo '  location / {' >> /etc/nginx/sites-available/openclaw && \
+              echo '    proxy_pass http://localhost:18789;' >> /etc/nginx/sites-available/openclaw && \
+              echo '    proxy_http_version 1.1;' >> /etc/nginx/sites-available/openclaw && \
+              echo '    proxy_set_header Upgrade $http_upgrade;' >> /etc/nginx/sites-available/openclaw && \
+              echo '    proxy_set_header Connection "upgrade";' >> /etc/nginx/sites-available/openclaw && \
+              echo '  }' >> /etc/nginx/sites-available/openclaw && \
+              echo '}' >> /etc/nginx/sites-available/openclaw && \
+              ln -s /etc/nginx/sites-available/openclaw /etc/nginx/sites-enabled/ && \
+              rm -f /etc/nginx/sites-enabled/default
+          
+          # 創建 systemd 服務
+          RUN echo '[Unit]' > /etc/systemd/system/openclaw.service && \
+              echo 'Description=OpenClaw Gateway' >> /etc/systemd/system/openclaw.service && \
+              echo 'After=network.target' >> /etc/systemd/system/openclaw.service && \
+              echo '' >> /etc/systemd/system/openclaw.service && \
+              echo '[Service]' >> /etc/systemd/system/openclaw.service && \
+              echo 'Type=simple' >> /etc/systemd/system/openclaw.service && \
+              echo 'User=node' >> /etc/systemd/system/openclaw.service && \
+              echo 'WorkingDirectory=/app' >> /etc/systemd/system/openclaw.service && \
+              echo 'ExecStart=/usr/local/bin/node dist/index.js gateway --bind lan' >> /etc/systemd/system/openclaw.service && \
+              echo 'Restart=always' >> /etc/systemd/system/openclaw.service && \
+              echo '' >> /etc/systemd/system/openclaw.service && \
+              echo '[Install]' >> /etc/systemd/system/openclaw.service && \
+              echo 'WantedBy=multi-user.target' >> /etc/systemd/system/openclaw.service && \
+              systemctl enable openclaw.service && \
+              systemctl enable nginx.service
+          
+          USER node
+          
+          CMD ["/sbin/init"]
+          EOF
+          fi
+          
+          # 構建自定義鏡像
+          docker build -f Dockerfile.custom -t openclaw-${{ matrix.variant }}:latest .
+
+      - name: Export Docker image to rootfs
+        run: |
+          CONTAINER_ID=$(docker create openclaw-${{ matrix.variant }}:latest)
+          docker export $CONTAINER_ID -o rootfs.tar
+          docker rm $CONTAINER_ID
+          
+          echo "Rootfs size: $(du -h rootfs.tar | cut -f1)"
+
+      - name: Create QEMU VM disk
+        run: |
+          if [ "${{ matrix.variant }}" = "gui" ]; then
+            qemu-img create -f qcow2 openclaw-${{ matrix.variant }}.qcow2 12G
+          else
+            qemu-img create -f qcow2 openclaw-${{ matrix.variant }}.qcow2 8G
+          fi
+
+      - name: Install system to VM disk
+        run: |
+          sudo modprobe nbd max_part=8
+          sudo qemu-nbd --connect=/dev/nbd0 openclaw-${{ matrix.variant }}.qcow2
+          sleep 2
+          
+          # 分區和格式化
+          sudo parted /dev/nbd0 --script mklabel msdos
+          sudo parted /dev/nbd0 --script mkpart primary ext4 1MiB 100%
+          sudo partprobe /dev/nbd0
+          sleep 2
+          sudo mkfs.ext4 -F /dev/nbd0p1
+          
+          # 掛載並解壓
+          sudo mkdir -p /mnt/vm
+          sudo mount /dev/nbd0p1 /mnt/vm
+          sudo tar -xf rootfs.tar -C /mnt/vm
+          
+          # 配置 fstab
+          echo '/dev/sda1 / ext4 defaults 0 1' | sudo tee /mnt/vm/etc/fstab
+          
+          # 安裝 bootloader
+          sudo mount --bind /dev /mnt/vm/dev
+          sudo mount --bind /proc /mnt/vm/proc
+          sudo mount --bind /sys /mnt/vm/sys
+          
+          sudo chroot /mnt/vm /bin/bash -c "
+            grub-install --target=i386-pc /dev/nbd0
+            update-grub
+          "
+          
+          # 清理
+          sudo umount /mnt/vm/dev /mnt/vm/proc /mnt/vm/sys
+          sudo umount /mnt/vm
+          sudo qemu-nbd --disconnect /dev/nbd0
+
+      - name: Compress and checksum
+        run: |
+          qemu-img convert -c -O qcow2 \
+            openclaw-${{ matrix.variant }}.qcow2 \
+            openclaw-${{ matrix.variant }}-compressed.qcow2
+          
+          sha256sum openclaw-${{ matrix.variant }}-compressed.qcow2 > \
+            openclaw-${{ matrix.variant }}.sha256
+          
+          echo "Final size:"
+          ls -lh openclaw-${{ matrix.variant }}-compressed.qcow2
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openclaw-vm-${{ matrix.variant }}
+          path: |
+            openclaw-${{ matrix.variant }}-compressed.qcow2
+            openclaw-${{ matrix.variant }}.sha256
