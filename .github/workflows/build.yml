@@ -1,50 +1,17 @@
-name: Build and Split OpenClaw VM
+name: Build and Split OpenClaw VM (Simple)
 
 on:
   schedule:
-    # 每天 UTC 2 点检查
+    # 每天 UTC 2 点构建
     - cron: '0 2 * * *'
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/build-vm.yml'
-      - 'scripts/**'
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: openclaw-docker
   PART_SIZE: 1500m
 
 jobs:
-  check-openclaw:
-    name: Check for OpenClaw Updates
-    runs-on: ubuntu-latest
-    outputs:
-      should_build: ${{ steps.check.outputs.should_build }}
-      image_digest: ${{ steps.check.outputs.digest }}
-      timestamp: ${{ steps.check.outputs.timestamp }}
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
-
-      - name: Check for OpenClaw updates
-        id: check
-        run: bash scripts/check-openclaw-update.sh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   build-vm:
     name: Build OpenClaw VM (${{ matrix.variant }})
-    needs: check-openclaw
-    if: needs.check-openclaw.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -55,49 +22,288 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up environment
-        run: bash scripts/setup-environment.sh
-
-      - name: Free up disk space
+      - name: Install dependencies
         run: |
-          sudo apt-get remove -y ghc-* google-cloud-cli azure-cli || true
-          sudo apt-get autoremove -y
-          sudo rm -rf /usr/share/dotnet /usr/share/swift
-          echo "Available disk space:"
-          df -h /
+          sudo apt-get update
+          sudo apt-get install -y \
+            qemu-utils \
+            e2fsprogs \
+            parted \
+            grub-pc-bin
 
-      - name: Pull OpenClaw Docker image
+      - name: Pull official OpenClaw image
         run: |
           echo "Pulling official OpenClaw image..."
           docker pull ghcr.io/phioranex/openclaw-docker:latest
-          docker tag ghcr.io/phioranex/openclaw-docker:latest openclaw:latest
-          docker images | grep openclaw
+          docker tag ghcr.io/phioranex/openclaw-docker:latest openclaw:base
 
-      - name: Generate Dockerfile for ${{ matrix.variant }}
-        run: bash scripts/generate-dockerfile.sh ${{ matrix.variant }}
-
-      - name: Build custom Docker image
+      - name: Add GUI layer (if needed)
+        if: matrix.variant == 'gui'
         run: |
-          echo "Building Docker image for ${{ matrix.variant }}..."
-          docker build -f Dockerfile.custom -t openclaw-${{ matrix.variant }}:latest .
-          docker images | grep openclaw
+          # 创建一个薄层来添加 GUI 依赖
+          cat > Dockerfile.custom << 'EOF'
+FROM openclaw:base
 
-      - name: Create VM disk
+USER root
+
+# 仅添加 GUI 所需的最小包
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      xvfb \
+      lightdm \
+      lightdm-gtk-greeter \
+      xfce4 \
+      xfce4-terminal \
+      x11-apps && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+USER node
+EOF
+          
+          echo "Building GUI image..."
+          docker build -f Dockerfile.custom -t openclaw-gui:latest .
+
+      - name: Tag headless image (no build needed)
+        if: matrix.variant == 'headless'
         run: |
+          docker tag openclaw:base openclaw-headless:latest
+
+      - name: Export Docker image to rootfs
+        run: |
+          echo "Exporting Docker image..."
+          VARIANT=${{ matrix.variant }}
+          IMAGE_TAG=openclaw-${VARIANT}:latest
+          
+          CONTAINER_ID=$(docker create $IMAGE_TAG)
+          docker export $CONTAINER_ID > rootfs.tar
+          docker rm $CONTAINER_ID
+          
+          echo "✓ Rootfs exported: $(du -h rootfs.tar | cut -f1)"
+
+      - name: Create QEMU VM disk
+        run: |
+          VARIANT=${{ matrix.variant }}
           DISK_SIZE=${{ matrix.variant == 'gui' && '12G' || '8G' }}
-          echo "Creating $DISK_SIZE disk..."
-          qemu-img create -f qcow2 openclaw-${{ matrix.variant }}.qcow2 $DISK_SIZE
+          
+          echo "Creating $DISK_SIZE disk for $VARIANT..."
+          qemu-img create -f qcow2 openclaw-${VARIANT}.qcow2 $DISK_SIZE
 
       - name: Install system to VM disk
-        run: bash scripts/install-system-to-vm.sh ${{ matrix.variant }}
+        run: |
+          set -e
+          VARIANT=${{ matrix.variant }}
+          
+          echo "Installing system to VM disk..."
+          
+          # 加载 NBD 模块
+          sudo modprobe nbd max_part=8
+          
+          # 连接 qcow2 到 NBD
+          sudo qemu-nbd --connect=/dev/nbd0 openclaw-${VARIANT}.qcow2
+          sleep 2
+          
+          # 分区和格式化
+          sudo parted /dev/nbd0 --script mklabel msdos
+          sudo parted /dev/nbd0 --script mkpart primary ext4 1MiB 100%
+          sudo partprobe /dev/nbd0
+          sleep 2
+          sudo mkfs.ext4 -F /dev/nbd0p1
+          
+          # 掛載並解壓
+          sudo mkdir -p /mnt/vm
+          sudo mount /dev/nbd0p1 /mnt/vm
+          
+          echo "Extracting rootfs..."
+          sudo tar -xf rootfs.tar -C /mnt/vm
+          
+          # 配置 fstab
+          echo '/dev/sda1 / ext4 defaults,errors=remount-ro 0 1' | sudo tee /mnt/vm/etc/fstab
+          
+          # 安装 bootloader
+          echo "Installing bootloader..."
+          sudo mount --bind /dev /mnt/vm/dev
+          sudo mount --bind /proc /mnt/vm/proc
+          sudo mount --bind /sys /mnt/vm/sys
+          
+          sudo chroot /mnt/vm /bin/bash -c "
+            apt-get update
+            apt-get install -y --no-install-recommends grub-pc grub-efi-amd64
+            grub-install --target=i386-pc /dev/nbd0
+            update-grub
+          " || echo "Bootloader installation completed with warnings"
+          
+          # 清理
+          sudo umount /mnt/vm/dev /mnt/vm/proc /mnt/vm/sys
+          sudo umount /mnt/vm
+          sudo qemu-nbd --disconnect /dev/nbd0
+          
+          # 删除 rootfs
+          rm -f rootfs.tar
+          
+          echo "✓ VM installation completed"
 
       - name: Compress and split disk
         run: |
+          set -e
+          VARIANT=${{ matrix.variant }}
+          
+          echo "Compressing VM disk..."
+          qemu-img convert -c -O qcow2 \
+            openclaw-${VARIANT}.qcow2 \
+            openclaw-${VARIANT}-compressed.qcow2
+          
+          # 删除未压缩版本
+          rm -f openclaw-${VARIANT}.qcow2
+          
+          echo "Compressed size: $(du -h openclaw-${VARIANT}-compressed.qcow2 | cut -f1)"
+          
+          # 分割
+          echo "Splitting into parts..."
           mkdir -p dist
-          bash scripts/compress-and-split.sh ${{ matrix.variant }} dist ${{ env.PART_SIZE }}
+          tar czf - openclaw-${VARIANT}-compressed.qcow2 | \
+            split -b ${{ env.PART_SIZE }} - dist/openclaw-${VARIANT}.tar.gz.
+          
+          echo "✓ Split completed:"
+          ls -lh dist/openclaw-${VARIANT}.tar.gz.* | awk '{print "  " $9 " (" $5 ")"}'
 
-      - name: Generate recovery files
-        run: bash scripts/generate-recovery-files.sh ${{ matrix.variant }} dist
+      - name: Generate checksums
+        run: |
+          VARIANT=${{ matrix.variant }}
+          cd dist
+          
+          sha256sum openclaw-${VARIANT}.tar.gz.* > openclaw-${VARIANT}.sha256
+          
+          echo "✓ Checksums generated"
+          head -1 openclaw-${VARIANT}.sha256
+
+      - name: Generate recovery script
+        run: |
+          VARIANT=${{ matrix.variant }}
+          cd dist
+          
+          cat > openclaw-${VARIANT}-recover.sh << 'EOF'
+#!/bin/bash
+set -e
+
+VARIANT="{{ VARIANT }}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+echo "OpenClaw VM Recovery Tool"
+echo "========================"
+echo "Variant: $VARIANT"
+echo ""
+
+# 检查文件
+PART_COUNT=$(ls -1 openclaw-${VARIANT}.tar.gz.* 2>/dev/null | wc -l)
+if [ $PART_COUNT -eq 0 ]; then
+  echo "Error: No split files found"
+  exit 1
+fi
+
+echo "Found $PART_COUNT split files"
+echo ""
+
+# 验证
+if [ -f openclaw-${VARIANT}.sha256 ]; then
+  echo "Verifying checksums..."
+  if ! sha256sum -c openclaw-${VARIANT}.sha256; then
+    echo "Error: Verification failed!"
+    exit 1
+  fi
+  echo "✓ All files verified"
+else
+  echo "Warning: Checksum file not found"
+fi
+
+echo ""
+echo "Extracting files (this may take a while)..."
+
+# 合并和解压
+if command -v pv &> /dev/null; then
+  cat openclaw-${VARIANT}.tar.gz.* | \
+    pv -N "Extracting" | \
+    tar xzf -
+else
+  cat openclaw-${VARIANT}.tar.gz.* | tar xzf -
+fi
+
+echo ""
+if [ -f openclaw-${VARIANT}-compressed.qcow2 ]; then
+  echo "✓ Recovery completed!"
+  echo ""
+  ls -lh openclaw-${VARIANT}-compressed.qcow2
+else
+  echo "Error: Output file not found"
+  exit 1
+fi
+EOF
+          
+          sed -i "s|{{ VARIANT }}|$VARIANT|g" openclaw-${VARIANT}-recover.sh
+          chmod +x openclaw-${VARIANT}-recover.sh
+          
+          echo "✓ Recovery script generated"
+
+      - name: Generate manifest and README
+        run: |
+          VARIANT=${{ matrix.variant }}
+          cd dist
+          
+          # 清单
+          cat > openclaw-${VARIANT}.manifest << EOF
+# OpenClaw VM - ${VARIANT^^} Edition
+# Generated: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+# Source: phioranex/openclaw-docker:latest
+
+## Files:
+EOF
+          ls -lh openclaw-${VARIANT}.tar.gz.* >> openclaw-${VARIANT}.manifest
+          
+          # README
+          cat > README-${VARIANT}.md << 'EOF'
+# OpenClaw VM - {{ VARIANT_UPPER }} Edition
+
+## Quick Start
+
+### Download
+Download all split files to the same directory:
+- `openclaw-{{ VARIANT }}.tar.gz.aa`
+- `openclaw-{{ VARIANT }}.tar.gz.ab`
+- (and more parts if any)
+
+### Recover
+```bash
+bash openclaw-{{ VARIANT }}-recover.sh
+```
+
+### Verify
+```bash
+sha256sum -c openclaw-{{ VARIANT }}.sha256
+```
+
+### Launch
+```bash
+qemu-system-x86_64 \
+  -drive file=openclaw-{{ VARIANT }}-compressed.qcow2,format=qcow2 \
+  -m 4G \
+  -smp cores=2
+```
+
+## Files
+- `openclaw-{{ VARIANT }}.tar.gz.*` - Split image files
+- `openclaw-{{ VARIANT }}.sha256` - Checksums
+- `openclaw-{{ VARIANT }}-recover.sh` - Recovery script
+- `openclaw-{{ VARIANT }}.manifest` - File list
+
+## Support
+See the project documentation for more details.
+EOF
+          
+          sed -i "s|{{ VARIANT }}|$VARIANT|g" README-${VARIANT}.md
+          sed -i "s|{{ VARIANT_UPPER }}|${VARIANT^^}|g" README-${VARIANT}.md
+          
+          echo "✓ Manifest and README generated"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -110,25 +316,25 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: dist/*
-          tag_name: vm-${{ matrix.variant }}-${{ needs.check-openclaw.outputs.timestamp }}
+          tag_name: vm-${{ matrix.variant }}-${{ github.run_id }}
           body: |
             # OpenClaw VM - ${{ matrix.variant }} Edition
             
-            **Built**: ${{ needs.check-openclaw.outputs.timestamp }}
-            **Image Digest**: `${{ needs.check-openclaw.outputs.image_digest }}`
+            **Built from:** `ghcr.io/phioranex/openclaw-docker:latest`
+            **Date:** ${{ github.event.repository.updated_at }}
             
             ## Files
             
-            - `openclaw-${{ matrix.variant }}.tar.gz.aa` (and more parts)
-            - `openclaw-${{ matrix.variant }}.sha256` - Checksums
+            - `openclaw-${{ matrix.variant }}.tar.gz.*` - Split image files
+            - `openclaw-${{ matrix.variant }}.sha256` - SHA256 checksums
             - `openclaw-${{ matrix.variant }}-recover.sh` - Recovery script
             - `README-${{ matrix.variant }}.md` - Instructions
             
             ## Quick Start
             
-            ```bash
-            bash openclaw-${{ matrix.variant }}-recover.sh
-            ```
+            1. Download all split files
+            2. Run: `bash openclaw-${{ matrix.variant }}-recover.sh`
+            3. Start: `qemu-system-x86_64 -drive file=openclaw-${{ matrix.variant }}-compressed.qcow2,format=qcow2`
             
             ## Verify
             
@@ -142,10 +348,12 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: bash scripts/cleanup.sh ${{ matrix.variant }}
+        run: |
+          rm -f rootfs.tar openclaw-*.qcow2 Dockerfile.custom
+          docker system prune -af
 
   notify:
-    name: Build Complete
+    name: Build Summary
     needs: [build-vm]
     runs-on: ubuntu-latest
     if: always()
@@ -154,7 +362,7 @@ jobs:
       - name: Check status
         run: |
           if [ "${{ needs.build-vm.result }}" = "success" ]; then
-            echo "✓ All builds completed successfully"
+            echo "✓ All VM builds completed successfully!"
             exit 0
           else
             echo "✗ Some builds failed"
