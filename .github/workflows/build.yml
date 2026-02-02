@@ -1,602 +1,493 @@
-name: Build OpenClaw VM Images (Simplified)
+name: Build and Split OpenClaw VM
 
 on:
   schedule:
+    # 每天 UTC 2 点检查并构建
     - cron: '0 2 * * *'
   workflow_dispatch:
-    inputs:
-      force_build:
-        description: 'Force rebuild'
-        required: false
-        default: 'false'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-vm.yml'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: openclaw-docker
+  PART_SIZE: 1500m
 
 jobs:
-  check-updates:
+  check-openclaw:
+    name: Check OpenClaw Updates
     runs-on: ubuntu-latest
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
-      openclaw_version: ${{ steps.check.outputs.version }}
+      image_digest: ${{ steps.check.outputs.digest }}
+      timestamp: ${{ steps.check.outputs.timestamp }}
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check OpenClaw latest commit
+      - name: Check for OpenClaw updates
         id: check
         run: |
-          # 获取 OpenClaw 最新 commit
-          LATEST_COMMIT=$(curl -s https://api.github.com/repos/pjasicek/openclaw/commits/master | jq -r .sha | cut -c1-7)
-          echo "Latest commit: $LATEST_COMMIT"
-          echo "version=$LATEST_COMMIT" >> $GITHUB_OUTPUT
+          set -e
           
-          # 检查是否已经构建过
-          if gh release view "vm-$LATEST_COMMIT" &>/dev/null; then
+          echo "Checking OpenClaw Docker image..."
+          
+          # 获取最新的镜像摘要
+          LATEST_DIGEST=$(docker manifest inspect ghcr.io/phioranex/openclaw-docker:latest 2>/dev/null | \
+            jq -r '.config.digest' || echo "unknown")
+          
+          echo "Latest digest: $LATEST_DIGEST"
+          echo "digest=$LATEST_DIGEST" >> $GITHUB_OUTPUT
+          
+          # 检查是否已经为这个版本构建过
+          RELEASE_TAG="vm-${LATEST_DIGEST:7:12}"
+          
+          if gh release view "$RELEASE_TAG" &>/dev/null 2>&1; then
+            echo "Already built for this version"
             echo "should_build=false" >> $GITHUB_OUTPUT
           else
+            echo "New version detected"
             echo "should_build=true" >> $GITHUB_OUTPUT
           fi
+          
+          # 记录时间戳
+          echo "timestamp=$(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build-vm-images:
-    needs: check-updates
-    if: needs.check-updates.outputs.should_build == 'true' || github.event.inputs.force_build == 'true'
+  build-vm:
+    name: Build OpenClaw VM (${{ matrix.variant }})
+    needs: check-openclaw
+    if: needs.check-openclaw.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
         variant: [gui, headless]
+      max-parallel: 1  # 依次构建以节省资源
     
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v2
 
-      - name: Install QEMU tools
+      - name: Install QEMU and utilities
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-utils
+          sudo apt-get install -y \
+            qemu-utils \
+            qemu-system-x86-64 \
+            e2fsprogs \
+            parted \
+            grub-pc-bin \
+            p7zip-full \
+            pv
 
-      - name: Create Dockerfile for ${{ matrix.variant }}
+      - name: Free up disk space
+        run: |
+          # 删除不需要的软件以节省空间
+          sudo apt-get remove -y ghc-* google-cloud-cli azure-cli || true
+          sudo apt-get autoremove -y
+          sudo rm -rf /usr/share/dotnet /usr/share/swift
+          
+          echo "Available disk space:"
+          df -h /
+
+      - name: Pull OpenClaw Docker image
+        run: |
+          echo "Pulling official OpenClaw image..."
+          docker pull ghcr.io/phioranex/openclaw-docker:latest
+          docker tag ghcr.io/phioranex/openclaw-docker:latest openclaw:latest
+          
+          docker images | grep openclaw
+
+      - name: Create custom Dockerfile for ${{ matrix.variant }}
         run: |
           if [ "${{ matrix.variant }}" = "gui" ]; then
-            cat > Dockerfile << 'DOCKERFILE'
-          FROM alpine:3.19
-          
-          # 安装 X11 和桌面环境
-          RUN apk add --no-cache \
-              xorg-server xf86-video-qxl xf86-input-evdev \
-              xfce4 xfce4-terminal lightdm \
-              dbus eudev mesa-dri-gallium \
-              nodejs npm git cmake make g++ pkgconfig \
-              sdl2-dev sdl2_mixer-dev sdl2_image-dev \
-              libpng-dev zlib-dev curl jq openrc \
-              linux-lts syslinux grub grub-bios
-          
-          # 配置服务
-          RUN rc-update add dbus default && \
-              rc-update add udev default && \
-              rc-update add lightdm default && \
-              rc-update add networking boot && \
-              rc-update add urandom boot
-          
-          # 创建用户
-          RUN adduser -D -s /bin/sh openclaw && \
-              echo "openclaw:openclaw" | chpasswd
-          
-          # 安装 OpenClaw
-          WORKDIR /opt/openclaw
-          RUN git clone --depth 1 https://github.com/pjasicek/openclaw.git . || \
-              (echo "Using fallback repo" && git clone --depth 1 https://github.com/H-uru/OpenClaw.git .) && \
-              if [ -f BUILD_LINUX.md ]; then \
-                mkdir -p build && cd build && \
-                cmake .. -DCMAKE_BUILD_TYPE=Release && \
-                make -j$(nproc) || echo "Build failed, will retry on first boot"; \
-              fi && \
-              chown -R openclaw:openclaw /opt/openclaw
-          
-          # 创建启动脚本
-          RUN echo '#!/bin/sh' > /usr/local/bin/start-openclaw && \
-              echo 'cd /opt/openclaw' >> /usr/local/bin/start-openclaw && \
-              echo 'if [ -f ./build/openclaw ]; then' >> /usr/local/bin/start-openclaw && \
-              echo '  ./build/openclaw' >> /usr/local/bin/start-openclaw && \
-              echo 'else' >> /usr/local/bin/start-openclaw && \
-              echo '  echo "Building OpenClaw..."' >> /usr/local/bin/start-openclaw && \
-              echo '  mkdir -p build && cd build' >> /usr/local/bin/start-openclaw && \
-              echo '  cmake .. && make -j$(nproc)' >> /usr/local/bin/start-openclaw && \
-              echo '  ./openclaw' >> /usr/local/bin/start-openclaw && \
-              echo 'fi' >> /usr/local/bin/start-openclaw && \
-              chmod +x /usr/local/bin/start-openclaw
-          
-          # 配置网络
-          RUN echo -e "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp" > /etc/network/interfaces
-          
-          CMD ["/sbin/init"]
-          DOCKERFILE
-          
+            cat > Dockerfile.custom << 'EOF'
+FROM openclaw:latest
+
+USER root
+
+# 安装 GUI 环境
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      systemd systemd-sysv systemd-container \
+      linux-image-amd64 \
+      grub-pc grub-common \
+      grub-efi-amd64 \
+      xorg x11-apps \
+      xfce4 xfce4-terminal \
+      lightdm lightdm-gtk-greeter \
+      dbus-x11 \
+      firefox-esr \
+      fonts-noto-cjk \
+      fonts-noto-cjk-extra && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# 配置 lightdm
+RUN systemctl enable lightdm 2>/dev/null || true
+
+# 创建启动脚本
+RUN mkdir -p /usr/local/bin && \
+    echo '#!/bin/bash' > /usr/local/bin/start-openclaw && \
+    echo 'cd /app && node dist/index.js gateway --bind lan' >> /usr/local/bin/start-openclaw && \
+    chmod +x /usr/local/bin/start-openclaw
+
+USER node
+CMD ["/sbin/init"]
+EOF
           else
-            cat > Dockerfile << 'DOCKERFILE'
-          FROM alpine:3.19
-          
-          # 只安装 headless 所需组件
-          RUN apk add --no-cache \
-              nodejs npm git cmake make g++ pkgconfig \
-              sdl2-dev sdl2_mixer-dev sdl2_image-dev \
-              libpng-dev zlib-dev curl jq openrc \
-              nginx linux-lts grub grub-bios
-          
-          RUN rc-update add nginx default && \
-              rc-update add networking boot && \
-              rc-update add urandom boot
-          
-          # 安装 OpenClaw
-          WORKDIR /opt/openclaw
-          RUN git clone --depth 1 https://github.com/pjasicek/openclaw.git . || \
-              git clone --depth 1 https://github.com/H-uru/OpenClaw.git . && \
-              if [ -f BUILD_LINUX.md ]; then \
-                mkdir -p build && cd build && \
-                cmake .. -DCMAKE_BUILD_TYPE=Release && \
-                make -j$(nproc) || echo "Build on first boot"; \
-              fi
-          
-          # 配置 Nginx web 界面
-          RUN mkdir -p /opt/openclaw/web && \
-              echo '<!DOCTYPE html><html><head><title>OpenClaw</title></head>' > /opt/openclaw/web/index.html && \
-              echo '<body><h1>OpenClaw Web Interface</h1>' >> /opt/openclaw/web/index.html && \
-              echo '<p>Access the game through this interface</p></body></html>' >> /opt/openclaw/web/index.html
-          
-          RUN echo 'server { listen 3000; root /opt/openclaw/web; index index.html; }' > /etc/nginx/http.d/openclaw.conf
-          
-          RUN echo -e "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp" > /etc/network/interfaces
-          
-          CMD ["/sbin/init"]
-          DOCKERFILE
+            # Headless 版本
+            cat > Dockerfile.custom << 'EOF'
+FROM openclaw:latest
+
+USER root
+
+# 安装最小化系统包
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      systemd systemd-sysv \
+      linux-image-amd64 \
+      grub-pc grub-common \
+      grub-efi-amd64 \
+      nginx \
+      curl \
+      wget && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# 配置 Nginx
+RUN rm -f /etc/nginx/sites-enabled/default && \
+    echo 'server {' > /etc/nginx/sites-available/openclaw && \
+    echo '  listen 3000 default_server;' >> /etc/nginx/sites-available/openclaw && \
+    echo '  listen [::]:3000 default_server;' >> /etc/nginx/sites-available/openclaw && \
+    echo '  server_name _;' >> /etc/nginx/sites-available/openclaw && \
+    echo '  location / {' >> /etc/nginx/sites-available/openclaw && \
+    echo '    proxy_pass http://localhost:18789;' >> /etc/nginx/sites-available/openclaw && \
+    echo '    proxy_http_version 1.1;' >> /etc/nginx/sites-available/openclaw && \
+    echo '    proxy_set_header Upgrade $http_upgrade;' >> /etc/nginx/sites-available/openclaw && \
+    echo '    proxy_set_header Connection "upgrade";' >> /etc/nginx/sites-available/openclaw && \
+    echo '    proxy_set_header Host $host;' >> /etc/nginx/sites-available/openclaw && \
+    echo '  }' >> /etc/nginx/sites-available/openclaw && \
+    echo '}' >> /etc/nginx/sites-available/openclaw && \
+    ln -s /etc/nginx/sites-available/openclaw /etc/nginx/sites-enabled/openclaw
+
+# 配置 systemd 服务
+RUN echo '[Unit]' > /etc/systemd/system/openclaw.service && \
+    echo 'Description=OpenClaw Gateway' >> /etc/systemd/system/openclaw.service && \
+    echo 'After=network.target' >> /etc/systemd/system/openclaw.service && \
+    echo '' >> /etc/systemd/system/openclaw.service && \
+    echo '[Service]' >> /etc/systemd/system/openclaw.service && \
+    echo 'Type=simple' >> /etc/systemd/system/openclaw.service && \
+    echo 'User=node' >> /etc/systemd/system/openclaw.service && \
+    echo 'WorkingDirectory=/app' >> /etc/systemd/system/openclaw.service && \
+    echo 'ExecStart=/usr/bin/node dist/index.js gateway --bind lan' >> /etc/systemd/system/openclaw.service && \
+    echo 'Restart=always' >> /etc/systemd/system/openclaw.service && \
+    echo 'RestartSec=10' >> /etc/systemd/system/openclaw.service && \
+    echo '' >> /etc/systemd/system/openclaw.service && \
+    echo '[Install]' >> /etc/systemd/system/openclaw.service && \
+    echo 'WantedBy=multi-user.target' >> /etc/systemd/system/openclaw.service && \
+    systemctl enable openclaw.service 2>/dev/null || true && \
+    systemctl enable nginx.service 2>/dev/null || true
+
+USER node
+CMD ["/sbin/init"]
+EOF
           fi
 
-      - name: Build Docker image
+      - name: Build custom Docker image
         run: |
-          docker buildx build \
-            --platform linux/amd64 \
-            --output type=docker,dest=openclaw-${{ matrix.variant }}.tar \
-            -t openclaw-${{ matrix.variant }}:latest \
-            .
-
-      - name: Convert Docker image to VM disk
-        run: |
-          # 载入 Docker 映像
-          docker load -i openclaw-${{ matrix.variant }}.tar
+          echo "Building custom image for ${{ matrix.variant }}..."
+          docker build -f Dockerfile.custom -t openclaw-${{ matrix.variant }}:latest .
           
-          # 创建容器并导出 rootfs
+          docker images | grep openclaw
+
+      - name: Export Docker image to rootfs
+        run: |
+          echo "Exporting Docker image..."
+          
           CONTAINER_ID=$(docker create openclaw-${{ matrix.variant }}:latest)
-          docker export $CONTAINER_ID -o rootfs.tar
+          echo "Container ID: $CONTAINER_ID"
+          
+          docker export $CONTAINER_ID > rootfs.tar
           docker rm $CONTAINER_ID
           
-          # 创建 QEMU 磁盘
-          if [ "${{ matrix.variant }}" = "gui" ]; then
-            qemu-img create -f qcow2 openclaw-${{ matrix.variant }}.qcow2 10G
-          else
-            qemu-img create -f qcow2 openclaw-${{ matrix.variant }}.qcow2 8G
-          fi
+          echo "Rootfs exported:"
+          du -h rootfs.tar
+
+      - name: Create QEMU VM disk
+        run: |
+          DISK_SIZE=${{ matrix.variant == 'gui' && '12G' || '8G' }}
+          echo "Creating $DISK_SIZE disk for ${{ matrix.variant }}..."
           
-          # 挂载并安装系统
+          qemu-img create -f qcow2 openclaw-${{ matrix.variant }}.qcow2 $DISK_SIZE
+
+      - name: Install system to VM disk
+        run: |
+          set -e
+          
+          echo "Installing system to VM disk..."
+          
+          # 加载 NBD 模块
           sudo modprobe nbd max_part=8
-          sudo qemu-nbd --connect=/dev/nbd0 openclaw-${{ matrix.variant }}.qcow2
           
-          # 创建分区
+          # 连接 qcow2 到 NBD
+          sudo qemu-nbd --connect=/dev/nbd0 openclaw-${{ matrix.variant }}.qcow2
+          sleep 2
+          
+          # 分区和格式化
+          echo "Partitioning disk..."
           sudo parted /dev/nbd0 --script mklabel msdos
           sudo parted /dev/nbd0 --script mkpart primary ext4 1MiB 100%
           sudo partprobe /dev/nbd0
           sleep 2
           
-          # 格式化并挂载
+          echo "Formatting partition..."
           sudo mkfs.ext4 -F /dev/nbd0p1
+          
+          # 掛載並解壓
+          echo "Mounting and extracting rootfs..."
           sudo mkdir -p /mnt/vm
           sudo mount /dev/nbd0p1 /mnt/vm
-          
-          # 解压 rootfs
           sudo tar -xf rootfs.tar -C /mnt/vm
           
+          # 配置 fstab
+          echo "Configuring fstab..."
+          echo '/dev/sda1 / ext4 defaults,errors=remount-ro 0 1' | sudo tee /mnt/vm/etc/fstab
+          
           # 安装 bootloader
+          echo "Installing bootloader..."
           sudo mount --bind /dev /mnt/vm/dev
           sudo mount --bind /proc /mnt/vm/proc
           sudo mount --bind /sys /mnt/vm/sys
+          sudo mount --bind /boot /mnt/vm/boot || true
           
-          sudo chroot /mnt/vm /bin/sh -c "
-            grub-install --target=i386-pc /dev/nbd0
-            grub-mkconfig -o /boot/grub/grub.cfg
+          sudo chroot /mnt/vm /bin/bash -c "
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
             
-            # 配置 fstab
-            echo '/dev/sda1 / ext4 defaults 0 1' > /etc/fstab
-          "
+            # 安装 grub
+            apt-get update
+            apt-get install -y --no-install-recommends grub-pc grub-efi-amd64
+            
+            # 配置 grub
+            grub-install --target=i386-pc /dev/nbd0
+            update-grub
+          " || echo "Bootloader installation completed with warnings"
           
           # 清理
-          sudo umount /mnt/vm/dev
-          sudo umount /mnt/vm/proc
-          sudo umount /mnt/vm/sys
+          echo "Cleaning up..."
+          sudo umount /mnt/vm/boot 2>/dev/null || true
+          sudo umount /mnt/vm/dev /mnt/vm/proc /mnt/vm/sys
           sudo umount /mnt/vm
           sudo qemu-nbd --disconnect /dev/nbd0
-          sudo rm -rf /mnt/vm
+          
+          echo "VM installation completed"
 
-      - name: Compress and split VM images
+      - name: Compress VM disk with QEMU
         run: |
-          # 压缩镜像
+          echo "Compressing VM disk..."
+          
           qemu-img convert -c -O qcow2 \
             openclaw-${{ matrix.variant }}.qcow2 \
             openclaw-${{ matrix.variant }}-compressed.qcow2
           
-          echo "${{ matrix.variant }} VM image size before split:"
-          ls -lh openclaw-${{ matrix.variant }}-compressed.qcow2
-          
-          # 计算完整文件的 SHA256
-          sha256sum openclaw-${{ matrix.variant }}-compressed.qcow2 > \
-            openclaw-${{ matrix.variant }}.sha256
-          
-          # 分片文件 (每个不超过 1.5GB)
-          CHUNK_SIZE="1536M"  # 1.5GB
-          split -b $CHUNK_SIZE -d -a 3 \
-            openclaw-${{ matrix.variant }}-compressed.qcow2 \
-            openclaw-${{ matrix.variant }}.part
-          
-          # 创建分片清单
-          ls openclaw-${{ matrix.variant }}.part* | sort > openclaw-${{ matrix.variant }}.manifest
-          
-          # 计算每个分片的 SHA256
-          for part in openclaw-${{ matrix.variant }}.part*; do
-            sha256sum $part >> openclaw-${{ matrix.variant }}.parts.sha256
-          done
-          
-          # 显示分片信息
-          echo "Split into parts:"
-          ls -lh openclaw-${{ matrix.variant }}.part*
-          echo ""
-          echo "Part count: $(ls openclaw-${{ matrix.variant }}.part* | wc -l)"
-          
-          # 创建分片元数据
-          cat > openclaw-${{ matrix.variant }}.split-info.json << EOF
-          {
-            "variant": "${{ matrix.variant }}",
-            "totalSize": $(stat -c%s openclaw-${{ matrix.variant }}-compressed.qcow2),
-            "sha256": "$(cat openclaw-${{ matrix.variant }}.sha256 | cut -d' ' -f1)",
-            "chunkSize": 1610612736,
-            "parts": $(ls openclaw-${{ matrix.variant }}.part* | wc -l),
-            "partFiles": $(ls openclaw-${{ matrix.variant }}.part* | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          }
-          EOF
-          
-          cat openclaw-${{ matrix.variant }}.split-info.json
+          echo "Compression completed:"
+          du -h openclaw-${{ matrix.variant }}-compressed.qcow2
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: openclaw-vm-${{ matrix.variant }}
-          path: |
-            openclaw-${{ matrix.variant }}.part*
-            openclaw-${{ matrix.variant }}.manifest
-            openclaw-${{ matrix.variant }}.sha256
-            openclaw-${{ matrix.variant }}.parts.sha256
-            openclaw-${{ matrix.variant }}.split-info.json
-
-  create-release:
-    needs: [check-updates, build-vm-images]
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-
-      - name: Prepare release assets
+      - name: Split and compress archive
         run: |
-          # 读取分片信息
-          GUI_INFO=$(cat openclaw-vm-gui/openclaw-gui.split-info.json)
-          HEADLESS_INFO=$(cat openclaw-vm-headless/openclaw-headless.split-info.json)
-          
-          # 提取信息
-          GUI_SIZE=$(echo $GUI_INFO | jq -r '.totalSize')
-          GUI_SHA256=$(echo $GUI_INFO | jq -r '.sha256')
-          GUI_PARTS=$(echo $GUI_INFO | jq -r '.parts')
-          
-          HEADLESS_SIZE=$(echo $HEADLESS_INFO | jq -r '.totalSize')
-          HEADLESS_SHA256=$(echo $HEADLESS_INFO | jq -r '.sha256')
-          HEADLESS_PARTS=$(echo $HEADLESS_INFO | jq -r '.parts')
-          
-          # 创建元数据文件
-          cat > release-info.json << EOF
-          {
-            "version": "vm-${{ needs.check-updates.outputs.openclaw_version }}",
-            "buildDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "openclawCommit": "${{ needs.check-updates.outputs.openclaw_version }}",
-            "images": {
-              "gui": {
-                "filename": "openclaw-gui-compressed.qcow2",
-                "size": $GUI_SIZE,
-                "sha256": "$GUI_SHA256",
-                "parts": $GUI_PARTS,
-                "chunkSize": 1610612736,
-                "manifest": "openclaw-gui.manifest",
-                "description": "Full GUI version with XFCE desktop",
-                "requirements": {
-                  "memory": "1GB minimum, 2GB recommended",
-                  "disk": "2.4GB compressed, ~10GB uncompressed",
-                  "ports": [18789, 18790, 3000]
-                },
-                "defaultCredentials": {
-                  "username": "openclaw",
-                  "password": "openclaw"
-                }
-              },
-              "headless": {
-                "filename": "openclaw-headless-compressed.qcow2",
-                "size": $HEADLESS_SIZE,
-                "sha256": "$HEADLESS_SHA256",
-                "parts": $HEADLESS_PARTS,
-                "chunkSize": 1610612736,
-                "manifest": "openclaw-headless.manifest",
-                "description": "Headless version with web interface",
-                "requirements": {
-                  "memory": "512MB minimum, 1GB recommended",
-                  "disk": "2.1GB compressed, ~8GB uncompressed",
-                  "ports": [18789, 18790, 3000]
-                },
-                "defaultCredentials": {
-                  "username": "openclaw",
-                  "password": "openclaw"
-                }
-              }
-            }
-          }
-          EOF
-          
-          # 创建使用说明
-          cat > USAGE.md << 'EOFUSAGE'
-          # OpenClaw VM Quick Start
-          
-          ## Download
-          
-          Choose your preferred version:
-          - **GUI**: ~2.4GB total (split into parts) - Full desktop environment
-          - **Headless**: ~2.1GB total (split into parts) - Web interface only
-          
-          ### Downloading with Desktop App (Recommended)
-          
-          Download the [OpenClaw VM Manager](https://github.com/${{ github.repository }}/releases/latest) - it will automatically download and merge all parts for you.
-          
-          ### Manual Download
-          
-          #### Option 1: Using the download script
-          
-          ```bash
-          # Download the helper script
-          wget https://github.com/${{ github.repository }}/releases/download/vm-${{ needs.check-updates.outputs.openclaw_version }}/download-and-merge.sh
-          chmod +x download-and-merge.sh
-          
-          # Download and merge GUI version
-          ./download-and-merge.sh gui vm-${{ needs.check-updates.outputs.openclaw_version }}
-          
-          # Or download and merge Headless version
-          ./download-and-merge.sh headless vm-${{ needs.check-updates.outputs.openclaw_version }}
-          ```
-          
-          #### Option 2: Manual download and merge
-          
-          **For GUI version:**
-          ```bash
-          # Download all parts (check openclaw-gui.manifest for complete list)
-          wget https://github.com/${{ github.repository }}/releases/download/vm-${{ needs.check-updates.outputs.openclaw_version }}/openclaw-gui.part000
-          wget https://github.com/${{ github.repository }}/releases/download/vm-${{ needs.check-updates.outputs.openclaw_version }}/openclaw-gui.part001
-          # ... download remaining parts
-          
-          # Merge parts
-          cat openclaw-gui.part* > openclaw-gui-compressed.qcow2
-          
-          # Verify checksum
-          sha256sum openclaw-gui-compressed.qcow2
-          # Compare with openclaw-gui.sha256
-          ```
-          
-          **For Headless version:**
-          ```bash
-          # Similar steps as GUI version
-          cat openclaw-headless.part* > openclaw-headless-compressed.qcow2
-          sha256sum openclaw-headless-compressed.qcow2
-          ```
-          
-          ## Manual Start (Testing)
-          
-          ```bash
-          # GUI version
-          qemu-system-x86_64 \
-            -m 2048 \
-            -smp 2 \
-            -hda openclaw-gui-compressed.qcow2 \
-            -net nic -net user,hostfwd=tcp::18789-:18789,hostfwd=tcp::3000-:3000
-          
-          # Headless version
-          qemu-system-x86_64 \
-            -m 1024 \
-            -smp 2 \
-            -hda openclaw-headless-compressed.qcow2 \
-            -net nic -net user,hostfwd=tcp::18789-:18789,hostfwd=tcp::3000-:3000 \
-            -nographic
-          ```
-          
-          ## Default Credentials
-          
-          - Username: `openclaw`
-          - Password: `openclaw`
-          
-          ## Access OpenClaw
-          
-          Open browser: http://localhost:18789
-          EOFUSAGE
-          
-          # 创建下载脚本
-          cat > download-and-merge.sh << 'EOFSCRIPT'
-          #!/bin/bash
-          
           set -e
           
-          VARIANT=$1
-          VERSION=$2
+          echo "Splitting image into parts of ${{ env.PART_SIZE }}..."
           
-          if [ -z "$VARIANT" ] || [ -z "$VERSION" ]; then
-            echo "Usage: $0 <gui|headless> <version>"
-            echo "Example: $0 gui vm-abc1234"
-            exit 1
-          fi
+          VARIANT=${{ matrix.variant }}
+          FILE="openclaw-${VARIANT}-compressed.qcow2"
           
-          REPO="${{ github.repository }}"
-          BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
+          mkdir -p dist
           
-          echo "Downloading OpenClaw VM ($VARIANT version)..."
+          # 使用 tar + gzip + split
+          tar czf - "$FILE" | split -b ${{ env.PART_SIZE }} - "dist/openclaw-${VARIANT}.tar.gz."
+          
+          echo "Split completed:"
+          ls -lh dist/openclaw-${VARIANT}.tar.gz.*
+          
+          # 计算总大小和压缩率
+          TOTAL_SIZE=$(du -sb dist/ | awk '{print $1}')
+          ORIGINAL_SIZE=$(stat -c%s "$FILE")
+          RATIO=$(echo "scale=2; $ORIGINAL_SIZE / $TOTAL_SIZE" | bc -l)
+          
           echo ""
-          
-          # 下载 manifest
-          echo "Downloading manifest..."
-          wget -q "$BASE_URL/openclaw-$VARIANT.manifest"
-          
-          # 下载所有分片
-          while IFS= read -r part; do
-            echo "Downloading $part..."
-            wget -c "$BASE_URL/$part"
-          done < "openclaw-$VARIANT.manifest"
-          
-          # 合并文件
-          echo ""
-          echo "Merging parts..."
-          cat openclaw-$VARIANT.part* > openclaw-$VARIANT-compressed.qcow2
-          
-          # 下载并验证 checksum
-          echo "Verifying checksum..."
-          wget -q "$BASE_URL/openclaw-$VARIANT.sha256"
-          
-          EXPECTED=$(cat openclaw-$VARIANT.sha256 | cut -d' ' -f1)
-          ACTUAL=$(sha256sum openclaw-$VARIANT-compressed.qcow2 | cut -d' ' -f1)
-          
-          if [ "$EXPECTED" = "$ACTUAL" ]; then
-            echo "✓ Checksum verified successfully!"
-            echo ""
-            echo "Output file: openclaw-$VARIANT-compressed.qcow2"
-            echo "Size: $(ls -lh openclaw-$VARIANT-compressed.qcow2 | awk '{print $5}')"
-            echo ""
-            echo "Cleaning up parts..."
-            rm openclaw-$VARIANT.part*
-            echo "Done!"
-          else
-            echo "✗ Checksum verification failed!"
-            echo "Expected: $EXPECTED"
-            echo "Actual: $ACTUAL"
-            exit 1
-          fi
-          EOFSCRIPT
-          
-          chmod +x download-and-merge.sh
-          
-          # 移动文件到根目录方便上传
-          mv openclaw-vm-gui/openclaw-gui.part* ./
-          mv openclaw-vm-gui/openclaw-gui.manifest ./
-          mv openclaw-vm-gui/openclaw-gui.sha256 ./
-          mv openclaw-vm-gui/openclaw-gui.parts.sha256 ./
-          
-          mv openclaw-vm-headless/openclaw-headless.part* ./
-          mv openclaw-vm-headless/openclaw-headless.manifest ./
-          mv openclaw-vm-headless/openclaw-headless.sha256 ./
-          mv openclaw-vm-headless/openclaw-headless.parts.sha256 ./
-          
-          echo "Files prepared for release:"
-          echo "GUI parts: $(ls openclaw-gui.part* | wc -l)"
-          echo "Headless parts: $(ls openclaw-headless.part* | wc -l)"
+          echo "Statistics:"
+          echo "  Original size: $(numfmt --to=iec-i --suffix=B $ORIGINAL_SIZE 2>/dev/null || du -h "$FILE" | cut -f1)"
+          echo "  Split total:   $(numfmt --to=iec-i --suffix=B $TOTAL_SIZE 2>/dev/null || du -sh dist/ | cut -f1)"
+          echo "  Compression:   ${RATIO}x"
 
-      - name: Create Release
+      - name: Generate checksums and manifests
+        run: |
+          set -e
+          
+          VARIANT=${{ matrix.variant }}
+          cd dist
+          
+          # 生成 SHA256 校验和
+          echo "Generating SHA256 checksums..."
+          sha256sum openclaw-${VARIANT}.tar.gz.* > openclaw-${VARIANT}.sha256
+          
+          # 生成清单文件
+          echo "Generating manifest..."
+          cat > openclaw-${VARIANT}.manifest << EOF
+# OpenClaw VM - ${VARIANT^^} Edition 镜像清单
+# 生成时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+# 
+EOF
+          
+          ls -lh openclaw-${VARIANT}.tar.gz.* >> openclaw-${VARIANT}.manifest
+          
+          # 显示校验和
+          echo ""
+          echo "Checksums:"
+          head -n 2 openclaw-${VARIANT}.sha256
+
+      - name: Generate recovery script
+        run: |
+          VARIANT=${{ matrix.variant }}
+          
+          cat > dist/openclaw-${VARIANT}-recover.sh << 'RECOVERY_EOF'
+#!/bin/bash
+set -e
+
+VARIANT=${{ matrix.variant }}
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+echo "=========================================="
+echo "OpenClaw VM Recovery Tool"
+echo "=========================================="
+echo "Variant: $VARIANT"
+echo ""
+
+# 检查文件
+PART_COUNT=$(ls -1 openclaw-${VARIANT}.tar.gz.* 2>/dev/null | wc -l)
+if [ $PART_COUNT -eq 0 ]; then
+  echo "Error: No split files found"
+  exit 1
+fi
+
+echo "Found $PART_COUNT split files"
+echo ""
+
+# 验证
+if [ -f openclaw-${VARIANT}.sha256 ]; then
+  echo "Verifying checksums..."
+  if ! sha256sum -c openclaw-${VARIANT}.sha256; then
+    echo "Error: Verification failed!"
+    exit 1
+  fi
+  echo "✓ All files verified"
+else
+  echo "Warning: Checksum file not found, skipping verification"
+fi
+
+echo ""
+echo "Extracting files (this may take a while)..."
+
+# 合并和解压
+if command -v pv &> /dev/null; then
+  cat openclaw-${VARIANT}.tar.gz.* | \
+    pv -N "Extracting" | \
+    tar xzf -
+else
+  cat openclaw-${VARIANT}.tar.gz.* | tar xzf -
+fi
+
+echo ""
+if [ -f openclaw-${VARIANT}-compressed.qcow2 ]; then
+  echo "✓ Recovery completed successfully!"
+  echo ""
+  ls -lh openclaw-${VARIANT}-compressed.qcow2
+  echo ""
+  echo "Next steps:"
+  echo "  qemu-system-x86_64 -drive file=openclaw-${VARIANT}-compressed.qcow2,format=qcow2 -m 4G"
+else
+  echo "Error: Output file not found"
+  exit 1
+fi
+RECOVERY_EOF
+          
+          chmod +x dist/openclaw-${VARIANT}-recover.sh
+          
+          echo "Recovery script generated"
+
+      - name: Create GitHub release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: vm-${{ needs.check-updates.outputs.openclaw_version }}
-          name: OpenClaw VM ${{ needs.check-updates.outputs.openclaw_version }}
+          files: |
+            dist/openclaw-${{ matrix.variant }}.tar.gz.*
+            dist/openclaw-${{ matrix.variant }}.sha256
+            dist/openclaw-${{ matrix.variant }}.manifest
+            dist/openclaw-${{ matrix.variant }}-recover.sh
+          tag_name: vm-${{ matrix.variant }}-${{ needs.check-openclaw.outputs.timestamp }}
           body: |
-            ## 🎮 OpenClaw VM Images
+            # OpenClaw VM - ${{ matrix.variant }} Edition
             
-            Auto-built VM images with OpenClaw commit `${{ needs.check-updates.outputs.openclaw_version }}`
+            Built: ${{ needs.check-openclaw.outputs.timestamp }}
+            OpenClaw Image Digest: `${{ needs.check-openclaw.outputs.image_digest }}`
             
-            ### 📥 Download Options
+            ## Files
             
-            **🎯 Recommended**: Use the [Desktop App](https://github.com/${{ github.repository }}/releases/latest) for automatic download and setup!
+            This release contains split and compressed VM images:
+            - `openclaw-${{ matrix.variant }}.tar.gz.aa` (and more parts)
+            - `openclaw-${{ matrix.variant }}.sha256` - Checksums
+            - `openclaw-${{ matrix.variant }}-recover.sh` - Recovery script
             
-            **📦 Files are split into parts** (max 1.5GB each) to comply with GitHub's file size limits.
-            
-            | Variant | Total Size | Parts | Description |
-            |---------|------------|-------|-------------|
-            | **GUI** | ~2.4GB | 2-3 parts | Full XFCE desktop environment |
-            | **Headless** | ~2.1GB | 2 parts | Web interface only |
-            
-            ### 🔽 Quick Download
+            ## Quick Start
             
             ```bash
-            # Download the helper script
-            wget https://github.com/${{ github.repository }}/releases/download/vm-${{ needs.check-updates.outputs.openclaw_version }}/download-and-merge.sh
-            chmod +x download-and-merge.sh
-            
-            # Download and merge GUI version
-            ./download-and-merge.sh gui vm-${{ needs.check-updates.outputs.openclaw_version }}
-            
-            # Or Headless version
-            ./download-and-merge.sh headless vm-${{ needs.check-updates.outputs.openclaw_version }}
+            bash openclaw-${{ matrix.variant }}-recover.sh
             ```
             
-            ### 📋 Release Files
+            ## Verify
             
-            **GUI Version:**
-            - `openclaw-gui.part*` - Split image files (2-3 parts)
-            - `openclaw-gui.manifest` - List of all parts
-            - `openclaw-gui.sha256` - Checksum for merged file
-            - `openclaw-gui.parts.sha256` - Individual part checksums
-            
-            **Headless Version:**
-            - `openclaw-headless.part*` - Split image files (2 parts)
-            - `openclaw-headless.manifest` - List of all parts
-            - `openclaw-headless.sha256` - Checksum for merged file
-            - `openclaw-headless.parts.sha256` - Individual part checksums
-            
-            **Utilities:**
-            - `download-and-merge.sh` - Automatic download and merge script
-            - `release-info.json` - Metadata for automatic updates
-            - `USAGE.md` - Detailed usage instructions
-            
-            ### 🔐 Checksums
-            
-            **GUI:**
+            ```bash
+            sha256sum -c openclaw-${{ matrix.variant }}.sha256
             ```
-            $(cat openclaw-gui.sha256)
-            ```
-            
-            **Headless:**
-            ```
-            $(cat openclaw-headless.sha256)
-            ```
-            
-            ### 🔑 Default Credentials
-            
-            - Username: `openclaw`
-            - Password: `openclaw`
-            
-            ### 🌐 Access
-            
-            After starting the VM, open: http://localhost:18789
-            
-            ### 📖 Manual Instructions
-            
-            See `USAGE.md` for detailed manual download and QEMU commands.
-          files: |
-            openclaw-gui.part*
-            openclaw-gui.manifest
-            openclaw-gui.sha256
-            openclaw-gui.parts.sha256
-            openclaw-headless.part*
-            openclaw-headless.manifest
-            openclaw-headless.sha256
-            openclaw-headless.parts.sha256
-            download-and-merge.sh
-            release-info.json
-            USAGE.md
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Cleaning up temporary files..."
+          rm -f rootfs.tar
+          rm -f openclaw-${{ matrix.variant }}.qcow2
+          rm -f openclaw-${{ matrix.variant }}-compressed.qcow2
+          rm -f Dockerfile.custom
+          rm -rf dist
+          docker system prune -af
+          
+          echo "Cleanup completed"
+
+  notify:
+    name: Notify on Completion
+    needs: [build-vm]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check build status
+        run: |
+          if [ "${{ needs.build-vm.result }}" = "success" ]; then
+            echo "✓ All VM builds completed successfully"
+            exit 0
+          else
+            echo "✗ Some builds failed"
+            exit 1
+          fi
