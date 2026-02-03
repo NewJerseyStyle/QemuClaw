@@ -1,0 +1,122 @@
+FROM alpine/openclaw:latest
+
+USER root
+
+# 1. 安裝系統依賴
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      systemd systemd-sysv \
+      grub-pc linux-image-amd64 \
+      nginx \
+      sudo && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# 2. 設置用戶密碼
+RUN echo 'node:openclaw' | chpasswd && \
+    usermod -aG sudo node
+
+# 3. 配置 OpenClaw systemd 服務
+RUN cat > /etc/systemd/system/openclaw.service << 'EOF'
+[Unit]
+Description=OpenClaw Gateway
+After=network.target mnt-shared.mount
+Requires=mnt-shared.mount
+
+[Service]
+Type=simple
+User=node
+WorkingDirectory=/app
+ExecStart=/usr/local/bin/node /app/dist/index.js gateway --bind lan
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 4. 配置共享文件夾自動掛載
+RUN mkdir -p /mnt/shared && \
+    cat > /etc/systemd/system/mnt-shared.mount << 'EOF'
+[Unit]
+Description=Mount QEMU shared folder
+Before=openclaw.service
+
+[Mount]
+What=host_share
+Where=/mnt/shared
+Type=9p
+Options=trans=virtio,version=9p2000.L,msize=524288
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 5. 配置 Nginx 反向代理
+RUN cat > /etc/nginx/sites-available/openclaw << 'EOF'
+server {
+    listen 3000;
+    server_name _;
+    
+    location / {
+        proxy_pass http://localhost:18789;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+EOF
+
+RUN ln -sf /etc/nginx/sites-available/openclaw /etc/nginx/sites-enabled/ && \
+    rm -f /etc/nginx/sites-enabled/default
+
+# 6. 創建配置目錄軟鏈接腳本
+RUN cat > /usr/local/bin/setup-openclaw-config.sh << 'EOF'
+#!/bin/bash
+if [ -d "/mnt/shared" ] && [ ! -L "/home/node/.openclaw" ]; then
+    mkdir -p /mnt/shared/.openclaw
+    ln -sf /mnt/shared/.openclaw /home/node/.openclaw
+    chown -h node:node /home/node/.openclaw
+fi
+EOF
+
+RUN chmod +x /usr/local/bin/setup-openclaw-config.sh && \
+    cat > /etc/systemd/system/setup-openclaw-config.service << 'EOF'
+[Unit]
+Description=Setup OpenClaw config symlink
+After=mnt-shared.mount
+Requires=mnt-shared.mount
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/setup-openclaw-config.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 7. 啟用所有服務
+RUN systemctl enable openclaw.service && \
+    systemctl enable nginx.service && \
+    systemctl enable mnt-shared.mount && \
+    systemctl enable setup-openclaw-config.service && \
+    systemctl mask getty@tty1.service
+
+# 8. 網絡配置
+RUN cat > /etc/systemd/network/20-wired.network << 'EOF'
+[Match]
+Name=en*
+
+[Network]
+DHCP=yes
+EOF
+
+RUN systemctl enable systemd-networkd
+
+USER node
+
+CMD ["/sbin/init"]
