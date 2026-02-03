@@ -211,74 +211,86 @@ jobs:
           echo "Final size:"
           ls -lh openclaw-${{ matrix.variant }}-compressed.qcow2
 
-          # echo "Splitting into parts..."
-          # mkdir -p dist
-          # tar czf - openclaw-${VARIANT}-compressed.qcow2 | \
-          #   split -b 1500m - dist/openclaw-${VARIANT}.tar.gz.
-          
-          # echo "✓ Split completed:"
-          # ls -lh dist/openclaw-${VARIANT}.tar.gz.* | awk '{print "  " $9 " (" $5 ")"}'
+          echo "Splitting into parts..."
+          mkdir -p dist
+          if (( $(stat -c %s "$filename") > 1800000000 )); then
+            tar czf - openclaw-${{ matrix.variant }}-compressed.qcow2 | \
+              split -b 1800m - dist/openclaw-${{ matrix.variant }}.tar.gz.
+
+            echo "✓ Split completed:"
+            ls -lh dist/openclaw-${{ matrix.variant }}.tar.gz.* | awk '{print "  " $9 " (" $5 ")"}'
+          else
+            echo "File is 1.8 GB or smaller"
+            mv openclaw-${{ matrix.variant }}-compressed.qcow2 dist/
+            mv openclaw-${{ matrix.variant }}.sha256 dist/
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: openclaw-vm-${{ matrix.variant }}
-          path: |
-            openclaw-${{ matrix.variant }}-compressed.qcow2
-            openclaw-${{ matrix.variant }}.sha256
-            # dist/
+          path: dist/
+          # path: |
+          #   openclaw-${{ matrix.variant }}-compressed.qcow2
+          #   openclaw-${{ matrix.variant }}.sha256
+          #   dist/
 
-      # - name: Create GitHub Release
-      #   uses: softprops/action-gh-release@v1
-      #   with:
-      #     files: dist/*
-      #     tag_name: vm-${{ matrix.variant }}-${{ github.run_id }}
-      #     body: |
-      #       # OpenClaw VM - ${{ matrix.variant }} Edition
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          tag_name: vm-${{ matrix.variant }}-${{ github.run_id }}
+          body: |
+            # OpenClaw VM - ${{ matrix.variant }} Edition
             
-      #       **Built from:** `alpine/openclaw:latest`
-      #       **Date:** ${{ github.event.repository.updated_at }}
+            **Built from:** `alpine/openclaw:latest`
+            **Date:** ${{ github.event.repository.updated_at }}
             
-      #       ## Files
-            
-      #       - `openclaw-${{ matrix.variant }}.tar.gz.*` - Split image files
-      #       - `openclaw-${{ matrix.variant }}.sha256` - SHA256 checksums
-            
-      #       ## Quick Start
-            
-      #       1. Download all split files
-      #       2. Run: `bash openclaw-merge.sh`
-      #       3. Start: `qemu-system-x86_64 -drive file=openclaw-${{ matrix.variant }}-compressed.qcow2,format=qcow2`
-            
-      #       ## Verify
-            
-      #       ```bash
-      #       sha256sum -c openclaw-${{ matrix.variant }}.sha256
-      #       ```
-      #     draft: false
-      #     prerelease: false
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ## Files
 
-      # - name: Cleanup
-      #   if: always()
-      #   run: |
-      #     rm -f rootfs.tar openclaw-*.qcow2 Dockerfile.custom
-      #     docker system prune -af
+            If file smaller than 1.8GB:
+            - `openclaw-${{ matrix.variant }}-compressed.qcow2` - Image files
+            - `openclaw-${{ matrix.variant }}.sha256` - SHA256 checksums
 
-  # notify:
-  #   name: Build Summary
-  #   needs: [build-vm]
-  #   runs-on: ubuntu-latest
-  #   if: always()
+            If file larger than 1.8GB:
+            - `openclaw-${{ matrix.variant }}.tar.gz.*` - Split image files
+            - `openclaw-${{ matrix.variant }}.sha256` - SHA256 checksums
+            
+            ## Quick Start
+            
+            1. Download all split files
+            2. Run: `bash openclaw-merge.sh`
+            3. Start: `qemu-system-x86_64 -drive file=openclaw-${{ matrix.variant }}-compressed.qcow2,format=qcow2`
+            
+            ## Verify
+            
+            ```bash
+            sha256sum -c openclaw-${{ matrix.variant }}.sha256
+            ```
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f rootfs.tar openclaw-*.qcow2 Dockerfile.custom
+          docker system prune -af
+
+  notify:
+    name: Build Summary
+    needs: [build-vm]
+    runs-on: ubuntu-latest
+    if: always()
     
-  #   steps:
-  #     - name: Check status
-  #       run: |
-  #         if [ "${{ needs.build-vm.result }}" = "success" ]; then
-  #           echo "✓ All VM builds completed successfully!"
-  #           exit 0
-  #         else
-  #           echo "✗ Some builds failed"
-  #           exit 1
-  #         fi
+    steps:
+      - name: Check status
+        run: |
+          if [ "${{ needs.build-vm.result }}" = "success" ]; then
+            echo "✓ All VM builds completed successfully!"
+            exit 0
+          else
+            echo "✗ Some builds failed"
+            exit 1
+          fi
