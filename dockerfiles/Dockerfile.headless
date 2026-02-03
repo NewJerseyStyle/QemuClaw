@@ -49,7 +49,7 @@ Options=trans=virtio,version=9p2000.L,msize=524288\n\
 WantedBy=multi-user.target' > /etc/systemd/system/mnt-shared.mount
 
 # 5. 配置 Nginx 反向代理
-RUN echo'server {\n\
+RUN echo 'server {\n\
     listen 3000;\n\
     server_name _;\n\
     \n\
