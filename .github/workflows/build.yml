@@ -73,7 +73,10 @@ jobs:
           
           # 配置服務
           RUN systemctl enable lightdm || true
-          
+
+          # 設置密碼
+          RUN echo 'node:openclaw' | chpasswd
+
           # 創建啟動腳本
           RUN echo '#!/bin/bash' > /usr/local/bin/start-openclaw && \
               echo 'cd /app && node dist/index.js gateway --bind lan' >> /usr/local/bin/start-openclaw && \
@@ -88,6 +91,26 @@ jobs:
               echo 'Terminal=true' >> /etc/skel/Desktop/OpenClaw.desktop && \
               chmod +x /etc/skel/Desktop/OpenClaw.desktop
           
+          # 自動掛載共享文件夾
+          RUN cat > /etc/systemd/system/mnt-shared.mount << 'EOF'
+          [Unit]
+          Description=Mount shared folder
+          
+          [Mount]
+          What=host_share
+          Where=/mnt/shared
+          Type=9p
+          Options=trans=virtio,version=9p2000.L
+          
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          RUN systemctl enable mnt-shared.mount
+
+          # 鏈接配置目錄
+          RUN ln -sf /mnt/shared/.openclaw /home/node/.openclaw
+
           USER node
           
           CMD ["/sbin/init"]
@@ -120,6 +143,9 @@ jobs:
               echo '}' >> /etc/nginx/sites-available/openclaw && \
               ln -s /etc/nginx/sites-available/openclaw /etc/nginx/sites-enabled/ && \
               rm -f /etc/nginx/sites-enabled/default
+
+          # 設置密碼
+          RUN echo 'node:openclaw' | chpasswd
           
           # 創建 systemd 服務
           RUN echo '[Unit]' > /etc/systemd/system/openclaw.service && \
@@ -137,7 +163,30 @@ jobs:
               echo 'WantedBy=multi-user.target' >> /etc/systemd/system/openclaw.service && \
               systemctl enable openclaw.service && \
               systemctl enable nginx.service
+
+          # 自動掛載共享文件夾
+          RUN cat > /etc/systemd/system/mnt-shared.mount << 'EOF'
+          [Unit]
+          Description=Mount shared folder
           
+          [Mount]
+          What=host_share
+          Where=/mnt/shared
+          Type=9p
+          Options=trans=virtio,version=9p2000.L
+          
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          RUN systemctl enable mnt-shared.mount
+
+          # 鏈接配置目錄
+          RUN ln -sf /mnt/shared/.openclaw /home/node/.openclaw
+
+          # Headless 版本禁用 getty
+          RUN systemctl mask getty@tty1.service
+
           USER node
           
           CMD ["/sbin/init"]
@@ -213,7 +262,7 @@ jobs:
 
           echo "Splitting into parts..."
           mkdir -p dist
-          if (( $(stat -c %s "$filename") > 1800000000 )); then
+          if (( $(stat -c %s "openclaw-${{ matrix.variant }}-compressed.qcow2") > 1800000000 )); then
             tar czf - openclaw-${{ matrix.variant }}-compressed.qcow2 | \
               split -b 1800m - dist/openclaw-${{ matrix.variant }}.tar.gz.
 
