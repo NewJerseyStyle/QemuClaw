@@ -5,6 +5,9 @@ on:
     - cron: '0 2 * * *'  # 每天檢查
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   check-openclaw-update:
     runs-on: ubuntu-latest
