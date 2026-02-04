@@ -19,7 +19,7 @@ jobs:
         id: check
         run: |
           # 檢查官方鏡像是否有更新（使用社區鏡像）
-          LATEST_DIGEST=$(docker manifest inspect alpine/openclaw:latest | jq -r .config.digest)
+          LATEST_DIGEST=$(docker manifest inspect ghcr.io/phioranex/openclaw-docker:latest | jq -r .config.digest)
           echo "digest=$LATEST_DIGEST" >> $GITHUB_OUTPUT
           
           # 檢查是否已經構建過這個版本
@@ -51,8 +51,8 @@ jobs:
       - name: Pull official OpenClaw image
         run: |
           # 拉取官方預構建鏡像
-          docker pull alpine/openclaw:latest
-          docker tag alpine/openclaw:latest openclaw:latest
+          docker pull ghcr.io/phioranex/openclaw-docker:latest
+          docker tag ghcr.io/phioranex/openclaw-docker:latest openclaw:latest
 
       - name: Customize for ${{ matrix.variant }}
         run: |
@@ -127,14 +127,14 @@ jobs:
 
           echo "Splitting into parts..."
           mkdir -p dist
-          if (( $(stat -c %s "openclaw-${{ matrix.variant }}-compressed.qcow2") > 1800000000 )); then
+          if (( $(stat -c %s "openclaw-${{ matrix.variant }}-compressed.qcow2") > 1900000000 )); then
             tar czf - openclaw-${{ matrix.variant }}-compressed.qcow2 | \
-              split -b 1800m - dist/openclaw-${{ matrix.variant }}.tar.gz.
+              split -b 1900m - dist/openclaw-${{ matrix.variant }}.tar.gz.
 
             echo "✓ Split completed:"
             ls -lh dist/openclaw-${{ matrix.variant }}.tar.gz.* | awk '{print "  " $9 " (" $5 ")"}'
           else
-            echo "File is 1.8 GB or smaller"
+            echo "File is 1.9 GB or smaller"
             mv openclaw-${{ matrix.variant }}-compressed.qcow2 dist/
             mv openclaw-${{ matrix.variant }}.sha256 dist/
           fi
@@ -157,16 +157,16 @@ jobs:
           body: |
             # OpenClaw VM - ${{ matrix.variant }} Edition
             
-            **Built from:** `alpine/openclaw:latest`
+            **Built from:** `ghcr.io/phioranex/openclaw-docker:latest`
             **Date:** ${{ github.event.repository.updated_at }}
             
             ## Files
 
-            If file smaller than 1.8GB:
+            If file smaller than 1.9GB:
             - `openclaw-${{ matrix.variant }}-compressed.qcow2` - Image files
             - `openclaw-${{ matrix.variant }}.sha256` - SHA256 checksums
 
-            If file larger than 1.8GB:
+            If file larger than 1.9GB:
             - `openclaw-${{ matrix.variant }}.tar.gz.*` - Split image files
             - `openclaw-${{ matrix.variant }}.sha256` - SHA256 checksums
             
