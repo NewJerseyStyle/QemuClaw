@@ -2,7 +2,12 @@
 
 [![Build OpenClaw VM (Optimized)](https://github.com/NewJerseyStyle/QemuClaw/actions/workflows/build.yml/badge.svg)](https://github.com/NewJerseyStyle/QemuClaw/actions/workflows/build.yml)
 
-Deploy OpenClaw in one click using Qemu VM on any machine
+* One-Click Isolated Deployment
+* No risks to your host system
+* Deploy OpenClaw securely on any machine (through QEMU VM)
+
+> **Think of it as an aquaculture facility for your OpenClaw**: A contained environment that keeps your OpenClaw thriving without damaging your furniture (main system).  
+> 🧺 With 1,000+ known vulnerabilities—including 4+ critical ones enabling potential remote code execution (RCE)—isolation is essential.
 
 ## Quick start
 Download released Qemu VM image, start it with Qemu
