@@ -19,7 +19,10 @@
     "virtual-machine",
     "ai-assistant"
   ],
-  "author": "",
+  "author": "David H. <dev.source@outlook.com>",
+  "bugs": {
+    "url": "https://github.com/NewJerseyStyle/QemuClaw/issues"
+  },
   "license": "MIT",
   "dependencies": {
     "electron-store": "^8.1.0",
