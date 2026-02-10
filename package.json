@@ -83,7 +83,7 @@
     },
     "linux": {
       "target": ["AppImage", "deb"],
-      "icon": "assets/icon.png",
+      "icon": "assets/icon-256.png",
       "category": "Utility",
       "artifactName": "QemuClaw-${version}-linux.${ext}"
     },
