@@ -70,12 +70,7 @@ jobs:
           echo "Rootfs size: $(du -h rootfs.tar | cut -f1)"
 
       - name: Create QEMU VM disk
-        run: |
-          if [ "${{ matrix.variant }}" = "gui" ]; then
-            qemu-img create -f qcow2 openclaw-${{ matrix.variant }}.qcow2 12G
-          else
-            qemu-img create -f qcow2 openclaw-${{ matrix.variant }}.qcow2 8G
-          fi
+        run: qemu-img create -f qcow2 openclaw-${{ matrix.variant }}.qcow2 8G
 
       - name: Install system to VM disk
         run: |
@@ -144,10 +139,6 @@ jobs:
         with:
           name: openclaw-vm-${{ matrix.variant }}
           path: dist/
-          # path: |
-          #   openclaw-${{ matrix.variant }}-compressed.qcow2
-          #   openclaw-${{ matrix.variant }}.sha256
-          #   dist/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
