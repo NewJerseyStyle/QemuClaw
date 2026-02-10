@@ -75,6 +75,18 @@ Requirements for development:
 - QEMU installed and on PATH (or set path in the app on first launch)
 - 7-Zip installed (for VM image extraction on Windows)
 
+## Using Local LLMs (Ollama, LM Studio, etc.)
+
+If you run a local LLM provider on your host machine, the VM can access it via the hostname `host.local` (resolves to `10.0.2.2`, the QEMU user-mode networking gateway to the host).
+
+| Host service | URL from inside the VM |
+|---|---|
+| Ollama (`localhost:11434`) | `http://host.local:11434` |
+| LM Studio (`localhost:1234`) | `http://host.local:1234` |
+| Any host service on port N | `http://host.local:N` |
+
+During OpenClaw onboarding, when asked for an API endpoint, use `http://host.local:<port>` instead of `http://localhost:<port>`.
+
 ## Architecture
 
 ```

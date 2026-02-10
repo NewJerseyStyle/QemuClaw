@@ -2,7 +2,7 @@ FROM alpine/openclaw:latest
 
 USER root
 
-# 1. 安裝系統依賴
+# 1. Install system dependencies for VM operation
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       systemd systemd-sysv \
@@ -12,11 +12,17 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# 2. 設置用戶密碼
+# 2. Set user password and sudo access
 RUN echo 'node:openclaw' | chpasswd && \
     usermod -aG sudo node
 
-# 3. 配置 OpenClaw systemd 服務
+# 3. Host access: QEMU user-mode networking exposes host at 10.0.2.2.
+#    Add hostname alias so services inside the VM (e.g. OpenClaw) can
+#    reach host-side LLM APIs (Ollama, LM Studio, etc.) via "host.local".
+RUN echo '10.0.2.2 host.local' >> /etc/hosts && \
+    echo 'HOST_IP=10.0.2.2' >> /etc/environment
+
+# 4. Configure OpenClaw systemd service
 #    Wants (not Requires) mnt-shared.mount so OpenClaw still starts
 #    when 9p is unavailable (e.g. Windows host uses SMB instead).
 RUN echo "[Unit]\n\
@@ -35,7 +41,7 @@ RestartSec=10\n\
 [Install]\n\
 WantedBy=multi-user.target" > /etc/systemd/system/openclaw.service
 
-# 4. 配置共享文件夾自動掛載
+# 5. Configure shared folder auto-mount (9p/virtfs)
 RUN mkdir -p /mnt/shared && \
     echo '[Unit]\n\
 Description=Mount QEMU shared folder\n\
@@ -50,7 +56,7 @@ Options=trans=virtio,version=9p2000.L,msize=524288\n\
 [Install]\n\
 WantedBy=multi-user.target' > /etc/systemd/system/mnt-shared.mount
 
-# 5. 配置 Nginx 反向代理
+# 6. Configure Nginx reverse proxy
 RUN echo 'server {\n\
     listen 3000;\n\
     server_name _;\n\
@@ -69,7 +75,7 @@ RUN echo 'server {\n\
 RUN ln -sf /etc/nginx/sites-available/openclaw /etc/nginx/sites-enabled/ && \
     rm -f /etc/nginx/sites-enabled/default
 
-# 6. 創建配置目錄軟鏈接腳本
+# 7. Create config directory symlink script
 RUN echo '#!/bin/bash\n\
 if [ -d "/mnt/shared" ] && [ ! -L "/home/node/.openclaw" ]; then\n\
     mkdir -p /mnt/shared/.openclaw\n\
@@ -91,23 +97,23 @@ RemainAfterExit=yes\n\
 [Install]\n\
 WantedBy=multi-user.target' > /etc/systemd/system/setup-openclaw-config.service
 
-# 7. Configure serial console (ttyS0) for QEMU headless operation
+# 8. Configure serial console (ttyS0) for QEMU headless operation
 RUN systemctl enable serial-getty@ttyS0.service
 
-# 8. Configure GRUB for serial console output
+# 9. Configure GRUB for serial console output
 RUN sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet"/' /etc/default/grub && \
     sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200"/' /etc/default/grub && \
     echo 'GRUB_TERMINAL="console serial"' >> /etc/default/grub && \
     echo 'GRUB_SERIAL_COMMAND="serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1"' >> /etc/default/grub
 
-# 9. 啟用所有服務
+# 10. Enable all services
 RUN systemctl enable openclaw.service && \
     systemctl enable nginx.service && \
     systemctl enable mnt-shared.mount && \
     systemctl enable setup-openclaw-config.service && \
     systemctl mask getty@tty1.service
 
-# 10. 網絡配置
+# 11. Network configuration
 RUN echo '[Match]\n\
 Name=en*\n\
 \n\
