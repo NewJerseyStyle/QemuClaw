@@ -53,14 +53,18 @@
       {
         "from": "vendor",
         "to": "vendor",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.ico",
@@ -75,7 +79,10 @@
       "artifactName": "QemuClaw-Setup-${version}.${ext}"
     },
     "mac": {
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "icon": "assets/icon.icns",
       "category": "public.app-category.utilities",
       "hardenedRuntime": true,
@@ -85,7 +92,10 @@
       "artifactName": "QemuClaw-${version}.dmg"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "assets/icon-256.png",
       "category": "Utility",
       "artifactName": "QemuClaw-${version}-linux.${ext}"

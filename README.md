@@ -15,7 +15,12 @@ One-click isolated deployment for [OpenClaw](https://github.com/alpine/openclaw)
 ### Desktop App
 
 <!-- APP_DOWNLOAD:START -->
-> First release coming soon. Run from source in the meantime (see Development section below).
+| Platform | Download |
+|----------|----------|
+| Windows | [QemuClaw-Setup-1.0.0.exe](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.0/QemuClaw-Setup-1.0.0.exe) (includes QEMU + 7-Zip) |
+| macOS | [QemuClaw-1.0.0.dmg](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.0/QemuClaw-1.0.0.dmg) |
+| Linux | [QemuClaw-1.0.0-linux.AppImage](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.0/QemuClaw-1.0.0-linux.AppImage) |
+| Linux (deb) | [QemuClaw-1.0.0-linux.deb](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.0/QemuClaw-1.0.0-linux.deb) |
 <!-- APP_DOWNLOAD:END -->
 
 ### VM Image
