@@ -17,10 +17,12 @@ RUN echo 'node:openclaw' | chpasswd && \
     usermod -aG sudo node
 
 # 3. 配置 OpenClaw systemd 服務
+#    Wants (not Requires) mnt-shared.mount so OpenClaw still starts
+#    when 9p is unavailable (e.g. Windows host uses SMB instead).
 RUN echo "[Unit]\n\
 Description=OpenClaw Gateway\n\
 After=network.target mnt-shared.mount\n\
-Requires=mnt-shared.mount\n\
+Wants=mnt-shared.mount\n\
 \n\
 [Service]\n\
 Type=simple\n\
@@ -79,7 +81,7 @@ RUN chmod +x /usr/local/bin/setup-openclaw-config.sh && \
     echo '[Unit]\n\
 Description=Setup OpenClaw config symlink\n\
 After=mnt-shared.mount\n\
-Requires=mnt-shared.mount\n\
+Wants=mnt-shared.mount\n\
 \n\
 [Service]\n\
 Type=oneshot\n\
@@ -89,14 +91,23 @@ RemainAfterExit=yes\n\
 [Install]\n\
 WantedBy=multi-user.target' > /etc/systemd/system/setup-openclaw-config.service
 
-# 7. 啟用所有服務
+# 7. Configure serial console (ttyS0) for QEMU headless operation
+RUN systemctl enable serial-getty@ttyS0.service
+
+# 8. Configure GRUB for serial console output
+RUN sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet"/' /etc/default/grub && \
+    sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200"/' /etc/default/grub && \
+    echo 'GRUB_TERMINAL="console serial"' >> /etc/default/grub && \
+    echo 'GRUB_SERIAL_COMMAND="serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1"' >> /etc/default/grub
+
+# 9. 啟用所有服務
 RUN systemctl enable openclaw.service && \
     systemctl enable nginx.service && \
     systemctl enable mnt-shared.mount && \
     systemctl enable setup-openclaw-config.service && \
     systemctl mask getty@tty1.service
 
-# 8. 網絡配置
+# 10. 網絡配置
 RUN echo '[Match]\n\
 Name=en*\n\
 \n\
