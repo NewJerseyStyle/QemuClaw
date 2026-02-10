@@ -1,4 +1,4 @@
-FROM alpine/openclaw:latest
+FROM ghcr.io/openclaw/openclaw:main
 
 USER root
 
@@ -34,7 +34,7 @@ Wants=mnt-shared.mount\n\
 Type=simple\n\
 User=node\n\
 WorkingDirectory=/app\n\
-ExecStart=/usr/local/bin/node /app/dist/index.js gateway --bind lan\n\
+ExecStart=/usr/local/bin/node /app/openclaw.mjs gateway --bind lan\n\
 Restart=always\n\
 RestartSec=10\n\
 \n\
