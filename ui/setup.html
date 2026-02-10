@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenClaw VM Setup</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #c62828 0%, #8e0000 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      overflow: hidden;
+      -webkit-app-region: drag;
+    }
+
+    .setup-card {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      width: 580px;
+      overflow: hidden;
+      -webkit-app-region: no-drag;
+    }
+
+    .setup-header {
+      background: linear-gradient(135deg, #c62828 0%, #8e0000 100%);
+      color: white;
+      padding: 24px 30px;
+      text-align: center;
+    }
+
+    .setup-header h1 {
+      font-size: 22px;
+      margin-bottom: 6px;
+    }
+
+    .setup-header p {
+      opacity: 0.9;
+      font-size: 13px;
+    }
+
+    .setup-body {
+      padding: 24px 30px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+      color: #333;
+      font-size: 14px;
+    }
+
+    .label-desc {
+      font-size: 12px;
+      color: #666;
+      font-weight: normal;
+      margin-top: 2px;
+    }
+
+    select, input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: border-color 0.3s;
+      background: white;
+    }
+
+    select:focus, input:focus {
+      outline: none;
+      border-color: #c62828;
+    }
+
+    .folder-selector {
+      display: flex;
+      gap: 8px;
+    }
+
+    .folder-selector input {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .folder-selector button {
+      padding: 10px 16px;
+      white-space: nowrap;
+    }
+
+    button {
+      padding: 10px 20px;
+      background: #c62828;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.3s;
+      font-weight: 600;
+    }
+
+    button:hover {
+      background: #a01a1a;
+    }
+
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .checkbox-group input {
+      width: auto;
+      accent-color: #c62828;
+    }
+
+    .checkbox-group label {
+      margin: 0;
+      font-weight: normal;
+    }
+
+    .info-box {
+      background: #fef2f2;
+      border-left: 3px solid #c62828;
+      padding: 10px 14px;
+      margin-top: 16px;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #555;
+      line-height: 1.5;
+    }
+
+    .setup-footer {
+      padding: 16px 30px;
+      border-top: 1px solid #e0e0e0;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .start-btn {
+      padding: 12px 32px;
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <div class="setup-card">
+    <div class="setup-header">
+      <h1>OpenClaw VM Setup</h1>
+      <p>Configure your personal AI assistant VM</p>
+    </div>
+
+    <div class="setup-body">
+      <div class="form-group">
+        <label>
+          Shared Folder
+          <div class="label-desc">Files shared between host and VM</div>
+        </label>
+        <div class="folder-selector">
+          <input type="text" id="sharedFolder" readonly placeholder="Select a folder...">
+          <button onclick="browseFolder()">Browse</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>
+          Memory (RAM)
+          <div class="label-desc">Memory allocated to the VM</div>
+        </label>
+        <select id="memory">
+          <option value="512">512 MB (Minimum)</option>
+          <option value="1024" selected>1 GB (Recommended)</option>
+          <option value="2048">2 GB</option>
+          <option value="4096">4 GB</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>
+          CPU Cores
+          <div class="label-desc">Processor cores allocated to the VM</div>
+        </label>
+        <select id="cpus">
+          <option value="1">1 Core</option>
+          <option value="2" selected>2 Cores (Recommended)</option>
+          <option value="4">4 Cores</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <div class="checkbox-group">
+          <input type="checkbox" id="autoStart">
+          <label for="autoStart">Start automatically on login</label>
+        </div>
+      </div>
+
+      <div class="info-box">
+        After the VM boots, OpenClaw configuration (API keys, channels, etc.) will be done inside the VM terminal using the built-in onboarding wizard.
+      </div>
+    </div>
+
+    <div class="setup-footer">
+      <button class="start-btn" onclick="completeSetup()">Start</button>
+    </div>
+  </div>
+
+  <script>
+    // Set default shared folder path
+    document.getElementById('sharedFolder').value = '';
+
+    async function browseFolder() {
+      const folder = await window.api.selectFolder();
+      if (folder) {
+        document.getElementById('sharedFolder').value = folder;
+      }
+    }
+
+    function completeSetup() {
+      const sharedFolder = document.getElementById('sharedFolder').value;
+      if (!sharedFolder) {
+        alert('Please select a shared folder.');
+        return;
+      }
+
+      const config = {
+        sharedFolder: sharedFolder,
+        memory: document.getElementById('memory').value,
+        cpus: document.getElementById('cpus').value,
+        autoStart: document.getElementById('autoStart').checked
+      };
+
+      window.api.completeSetup(config);
+    }
+
+    // If opened as settings editor, load existing config
+    window.api.onLoadConfig((config) => {
+      if (config) {
+        if (config.sharedFolder) document.getElementById('sharedFolder').value = config.sharedFolder;
+        if (config.memory) document.getElementById('memory').value = config.memory;
+        if (config.cpus) document.getElementById('cpus').value = config.cpus;
+        if (config.autoStart !== undefined) document.getElementById('autoStart').checked = config.autoStart;
+      }
+    });
+  </script>
+</body>
+</html>

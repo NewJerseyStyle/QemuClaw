@@ -1,0 +1,255 @@
+name: Build QemuClaw App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'ui/**'
+      - 'assets/**'
+      - 'package.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Determine version (runs once) ──────────────────────────────────
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine release version
+        id: version
+        run: |
+          PKG_VER=$(node -p "require('./package.json').version")
+          echo "Package.json version: $PKG_VER"
+
+          # Extract existing version from README APP_DOWNLOAD section
+          EXISTING_VER=$(sed -n '/APP_DOWNLOAD:START/,/APP_DOWNLOAD:END/p' README.md \
+            | grep -oP 'app-v\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "")
+
+          if [ -z "$EXISTING_VER" ]; then
+            EXISTING_VER="0.0.0"
+          fi
+          echo "Existing released version: $EXISTING_VER"
+
+          version_gt() {
+            [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ] && [ "$1" != "$2" ]
+          }
+
+          if version_gt "$PKG_VER" "$EXISTING_VER"; then
+            FINAL_VER="$PKG_VER"
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$EXISTING_VER"
+            FINAL_VER="${MAJOR}.${MINOR}.$((PATCH + 1))"
+            echo "Version bumped from $PKG_VER to $FINAL_VER"
+          fi
+
+          echo "Release version: $FINAL_VER"
+          echo "version=$FINAL_VER" >> $GITHUB_OUTPUT
+
+  # ── Build per platform ─────────────────────────────────────────────
+  build:
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            build_flag: --win
+            artifact_glob: |
+              dist/QemuClaw-Setup-*.exe
+          - os: macos-latest
+            platform: mac
+            build_flag: --mac
+            artifact_glob: |
+              dist/QemuClaw-*.dmg
+              dist/QemuClaw-*-mac.zip
+          - os: ubuntu-latest
+            platform: linux
+            build_flag: --linux
+            artifact_glob: |
+              dist/QemuClaw-*-linux.AppImage
+              dist/QemuClaw-*-linux.deb
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set version in package.json
+        shell: bash
+        run: |
+          VER="${{ needs.version.outputs.version }}"
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '$VER';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          echo "Set package.json version to $VER"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Windows: bundle QEMU + 7-Zip ──
+      - name: Bundle QEMU (Windows)
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          Write-Host "Installing QEMU via choco..."
+          choco install qemu --yes --no-progress
+
+          $qemuDir = "C:\Program Files\qemu"
+          $vendorQemu = "vendor\qemu"
+          New-Item -ItemType Directory -Force -Path $vendorQemu | Out-Null
+
+          Copy-Item "$qemuDir\qemu-system-x86_64.exe" $vendorQemu\
+          Copy-Item "$qemuDir\*.dll" $vendorQemu\
+          Copy-Item "$qemuDir\share" $vendorQemu\ -Recurse -ErrorAction SilentlyContinue
+
+          $size = (Get-ChildItem $vendorQemu -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
+          Write-Host "Bundled QEMU size: $([math]::Round($size, 1)) MB"
+
+      - name: Bundle 7-Zip (Windows)
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $vendor7z = "vendor\7zip"
+          New-Item -ItemType Directory -Force -Path $vendor7z | Out-Null
+
+          Copy-Item "C:\Program Files\7-Zip\7z.exe" $vendor7z\
+          Copy-Item "C:\Program Files\7-Zip\7z.dll" $vendor7z\
+
+          Write-Host "Bundled 7-Zip files:"
+          Get-ChildItem $vendor7z
+
+      # ── Build ──
+      - name: Build
+        shell: bash
+        run: npx electron-builder ${{ matrix.build_flag }} --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List build output
+        shell: bash
+        run: ls -lhR dist/ || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.platform }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
+  # ── Create release with all platform artifacts ─────────────────────
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List release assets
+        run: ls -lhR release-assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release-assets/*
+          tag_name: app-v${{ needs.version.outputs.version }}
+          name: QemuClaw v${{ needs.version.outputs.version }}
+          body: |
+            # QemuClaw v${{ needs.version.outputs.version }}
+
+            Desktop app for managing OpenClaw in an isolated QEMU VM.
+
+            ## Downloads
+
+            | Platform | File | Notes |
+            |----------|------|-------|
+            | Windows | `QemuClaw-Setup-${{ needs.version.outputs.version }}.exe` | Includes bundled QEMU and 7-Zip |
+            | macOS | `QemuClaw-${{ needs.version.outputs.version }}.dmg` | Requires QEMU via `brew install qemu` |
+            | Linux | `QemuClaw-${{ needs.version.outputs.version }}-linux.AppImage` | Requires QEMU via `apt install qemu-system-x86` |
+            | Linux (deb) | `QemuClaw-${{ needs.version.outputs.version }}-linux.deb` | Requires QEMU via `apt install qemu-system-x86` |
+
+            ## Install
+
+            **Windows:** Download and run the `.exe` installer. QEMU and 7-Zip are bundled.
+
+            **macOS:** Install QEMU first: `brew install qemu`, then open the `.dmg`.
+
+            **Linux:** Install QEMU first: `sudo apt install qemu-system-x86`, then run the `.AppImage` or install the `.deb`.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update README with download links
+        run: |
+          VER="${{ needs.version.outputs.version }}"
+          REPO="NewJerseyStyle/QemuClaw"
+          TAG="app-v${VER}"
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
+
+          WIN_URL="${BASE}/QemuClaw-Setup-${VER}.exe"
+          MAC_URL="${BASE}/QemuClaw-${VER}.dmg"
+          LINUX_URL="${BASE}/QemuClaw-${VER}-linux.AppImage"
+          DEB_URL="${BASE}/QemuClaw-${VER}-linux.deb"
+
+          # Build the replacement block
+          BLOCK="| Platform | Download |\n"
+          BLOCK+="|----------|----------|\n"
+          BLOCK+="| Windows | [QemuClaw-Setup-${VER}.exe](${WIN_URL}) (includes QEMU + 7-Zip) |\n"
+          BLOCK+="| macOS | [QemuClaw-${VER}.dmg](${MAC_URL}) |\n"
+          BLOCK+="| Linux | [QemuClaw-${VER}-linux.AppImage](${LINUX_URL}) |\n"
+          BLOCK+="| Linux (deb) | [QemuClaw-${VER}-linux.deb](${DEB_URL}) |"
+
+          # Replace content between APP_DOWNLOAD markers
+          sed -i "/<!-- APP_DOWNLOAD:START -->/,/<!-- APP_DOWNLOAD:END -->/{
+            /<!-- APP_DOWNLOAD:START -->/!{/<!-- APP_DOWNLOAD:END -->/!d}
+            /<!-- APP_DOWNLOAD:START -->/a\\
+          ${BLOCK}
+          }" README.md
+
+          echo "Updated README with download links for v${VER}"
+
+      - name: Update package.json version
+        run: |
+          VER="${{ needs.version.outputs.version }}"
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '$VER';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md package.json
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "ci: update download links for app v${{ needs.version.outputs.version }}"
+          git push

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Starting OpenClaw VM</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #c62828 0%, #8e0000 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      overflow: hidden;
+      -webkit-app-region: drag;
+    }
+
+    .boot-card {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      width: 440px;
+      padding: 30px;
+      text-align: center;
+      -webkit-app-region: no-drag;
+    }
+
+    .logo {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-size: 18px;
+      color: #333;
+      margin-bottom: 20px;
+    }
+
+    .stages {
+      text-align: left;
+      margin-bottom: 20px;
+    }
+
+    .stage {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      font-size: 14px;
+      color: #999;
+      transition: color 0.3s;
+    }
+
+    .stage.active {
+      color: #c62828;
+      font-weight: 600;
+    }
+
+    .stage.done {
+      color: #4caf50;
+    }
+
+    .stage-icon {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid #ddd;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      flex-shrink: 0;
+      transition: all 0.3s;
+    }
+
+    .stage.active .stage-icon {
+      border-color: #c62828;
+      background: #c62828;
+      color: white;
+    }
+
+    .stage.done .stage-icon {
+      border-color: #4caf50;
+      background: #4caf50;
+      color: white;
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid white;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    .elapsed {
+      font-size: 12px;
+      color: #999;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="boot-card">
+    <div class="logo">&#x1F99E;</div>
+    <h2>Starting OpenClaw VM</h2>
+
+    <div class="stages">
+      <div class="stage" id="stage-qemu">
+        <div class="stage-icon" id="icon-qemu"></div>
+        <span>Starting QEMU...</span>
+      </div>
+      <div class="stage" id="stage-boot">
+        <div class="stage-icon" id="icon-boot"></div>
+        <span>Waiting for VM to boot...</span>
+      </div>
+      <div class="stage" id="stage-login">
+        <div class="stage-icon" id="icon-login"></div>
+        <span>Logging in...</span>
+      </div>
+      <div class="stage" id="stage-openclaw">
+        <div class="stage-icon" id="icon-openclaw"></div>
+        <span>Waiting for OpenClaw service...</span>
+      </div>
+    </div>
+
+    <div class="elapsed" id="elapsed">Elapsed: 0s</div>
+  </div>
+
+  <script>
+    const stageOrder = ['qemu', 'boot', 'login', 'openclaw'];
+    let currentStageIndex = -1;
+    const startTime = Date.now();
+
+    // Update elapsed time
+    setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const min = Math.floor(elapsed / 60);
+      const sec = elapsed % 60;
+      document.getElementById('elapsed').textContent =
+        min > 0 ? `Elapsed: ${min}m ${sec}s` : `Elapsed: ${sec}s`;
+    }, 1000);
+
+    function setStage(stageId) {
+      const idx = stageOrder.indexOf(stageId);
+      if (idx < 0 || idx <= currentStageIndex) return;
+
+      // Mark all previous stages as done
+      for (let i = 0; i <= currentStageIndex; i++) {
+        const el = document.getElementById('stage-' + stageOrder[i]);
+        const icon = document.getElementById('icon-' + stageOrder[i]);
+        el.className = 'stage done';
+        icon.innerHTML = '&#x2713;';
+      }
+
+      // Mark current stage as active
+      currentStageIndex = idx;
+      const el = document.getElementById('stage-' + stageId);
+      const icon = document.getElementById('icon-' + stageId);
+      el.className = 'stage active';
+      icon.innerHTML = '<div class="spinner"></div>';
+
+      // Mark all later stages as pending
+      for (let i = idx + 1; i < stageOrder.length; i++) {
+        const el2 = document.getElementById('stage-' + stageOrder[i]);
+        const icon2 = document.getElementById('icon-' + stageOrder[i]);
+        el2.className = 'stage';
+        icon2.innerHTML = '';
+      }
+    }
+
+    function allDone() {
+      for (let i = 0; i < stageOrder.length; i++) {
+        const el = document.getElementById('stage-' + stageOrder[i]);
+        const icon = document.getElementById('icon-' + stageOrder[i]);
+        el.className = 'stage done';
+        icon.innerHTML = '&#x2713;';
+      }
+    }
+
+    window.api.onBootStatus((data) => {
+      if (data.stage === 'done') {
+        allDone();
+      } else {
+        setStage(data.stage);
+      }
+    });
+  </script>
+</body>
+</html>
