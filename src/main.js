@@ -190,7 +190,7 @@ function showBootWindow() {
 
   bootWindow = new BrowserWindow({
     width: 440,
-    height: 380,
+    height: 480,
     resizable: false,
     frame: false,
     webPreferences: {
