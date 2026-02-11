@@ -110,3 +110,11 @@ QemuClaw (Electron app)
 ## License
 
 MIT
+
+## Acknowledgements
+- 🙏 Thank you to [Arthur](https://github.com/imitation-alpha) for valuable support and assistance.
+- 🙌 Thanks [Hong Kong School of AI ⓕ](https://www.facebook.com/hkschoolofai/) for getting this project off to a strong start.
+- 💖 Grateful to [OpenClaw](https://github.com/openclaw/openclaw) for the impressive personal AI assistant and Docker image.
+- 🌟 Thanks to the Alpine Community for providing a [handy Docker image](https://hub.docker.com/r/alpine/openclaw).
+- 🤗 Appreciation to [QEMU](https://github.com/qemu/qemu) for the amazing virtualization technology.
+- 👉 A nod to [7-zip](https://7-zip.org/) for a powerful utility.
