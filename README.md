@@ -40,7 +40,7 @@ On first launch, the app will:
 3. Download the VM image if not already present
 4. Boot the VM headless — a status window shows boot progress
 5. Open the terminal for OpenClaw onboarding setup
-7. After setup, access OpenClaw via the Web UI (system tray > Open Web UI)
+6. After setup, access OpenClaw via the Web UI (system tray > Open Web UI)
 
 The app runs in the system tray. Right-click the tray icon for all options.
 
@@ -120,4 +120,5 @@ MIT
 - 🌟 Thanks to the Alpine Community for providing a [handy Docker image](https://hub.docker.com/r/alpine/openclaw).
 - 🤗 Appreciation to [QEMU](https://github.com/qemu/qemu) for the amazing virtualization technology.
 - 👉 A nod to [7-zip](https://7-zip.org/) for a powerful utility.
+
 
