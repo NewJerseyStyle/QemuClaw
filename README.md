@@ -24,6 +24,8 @@ One-click isolated deployment for [OpenClaw](https://github.com/alpine/openclaw)
 [Download OpenClaw VM Image](https://github.com/NewJerseyStyle/QemuClaw/releases) — go to releases page and download the latest `vm-headless-*` release.
 <!-- VM_DOWNLOAD:END -->
 
+<img width="500" height="220" alt="image" src="https://github.com/user-attachments/assets/d3c5394e-bf6a-48fe-8044-d663e3b75908" />
+
 ## Install (Desktop App)
 
 **Windows:** Download and run the `.exe` installer. QEMU and 7-Zip are bundled — no extra setup.
@@ -38,7 +40,7 @@ On first launch, the app will:
 3. Download the VM image if not already present
 4. Boot the VM headless — a status window shows boot progress
 5. Open the terminal for OpenClaw onboarding setup
-6. After setup, access OpenClaw via the Web UI (system tray > Open Web UI)
+7. After setup, access OpenClaw via the Web UI (system tray > Open Web UI)
 
 The app runs in the system tray. Right-click the tray icon for all options.
 
@@ -118,3 +120,4 @@ MIT
 - 🌟 Thanks to the Alpine Community for providing a [handy Docker image](https://hub.docker.com/r/alpine/openclaw).
 - 🤗 Appreciation to [QEMU](https://github.com/qemu/qemu) for the amazing virtualization technology.
 - 👉 A nod to [7-zip](https://7-zip.org/) for a powerful utility.
+
