@@ -112,6 +112,35 @@
       color: #999;
       margin-top: 8px;
     }
+
+    .boot-tip {
+      font-size: 12px;
+      color: #888;
+      margin-top: 14px;
+      line-height: 1.6;
+      text-align: left;
+      padding: 10px 14px;
+      background: #f5f5f5;
+      border-radius: 8px;
+    }
+
+    .boot-tip p {
+      margin: 0;
+    }
+
+    .boot-tip .highlight-tip {
+      margin-top: 6px;
+      color: #c62828;
+    }
+
+    .boot-tip .highlight-tip strong {
+      font-weight: 600;
+    }
+
+    .boot-tip .shared-folder-tip {
+      margin-top: 6px;
+      color: #555;
+    }
   </style>
 </head>
 <body>
@@ -139,6 +168,18 @@
     </div>
 
     <div class="elapsed" id="elapsed">Elapsed: 0s</div>
+
+    <div class="boot-tip">
+      <p>This may take up to 5 minutes with minimal CPU/RAM settings. Please be patient.</p>
+      <p class="shared-folder-tip">
+        &#x1F4C1; Exchange files with the VM via the shared folder.
+        Right-click the tray icon and select "Open Shared Folder".
+      </p>
+      <p class="highlight-tip" id="hyperv-tip" style="display:none">
+        &#x1F4A1; <strong>Tip:</strong> Enable Hyper-V in Windows for significantly faster VM boot.
+        Search "Turn Windows features on or off" in Start Menu and check "Hyper-V".
+      </p>
+    </div>
   </div>
 
   <script>
@@ -190,6 +231,11 @@
         el.className = 'stage done';
         icon.innerHTML = '&#x2713;';
       }
+    }
+
+    // Show Hyper-V tip on Windows
+    if (navigator.userAgent.includes('Windows')) {
+      document.getElementById('hyperv-tip').style.display = 'block';
     }
 
     window.api.onBootStatus((data) => {

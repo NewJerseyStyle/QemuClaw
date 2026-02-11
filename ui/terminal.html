@@ -29,11 +29,12 @@
   <script src="../node_modules/xterm/lib/xterm.js"></script>
   <script src="../node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
   <script src="../node_modules/xterm-addon-web-links/lib/xterm-addon-web-links.js"></script>
+  <script src="../node_modules/xterm-addon-unicode11/lib/xterm-addon-unicode11.js"></script>
   <script>
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 14,
-      fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
+      fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace, 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji'",
       theme: {
         background: '#1e1e1e',
         foreground: '#d4d4d4',
@@ -62,9 +63,12 @@
 
     const fitAddon = new FitAddon.FitAddon();
     const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+    const unicode11Addon = new Unicode11Addon.Unicode11Addon();
 
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
+    term.loadAddon(unicode11Addon);
+    term.unicode.activeVersion = '11';
     term.open(document.getElementById('terminal'));
 
     // Initial fit
