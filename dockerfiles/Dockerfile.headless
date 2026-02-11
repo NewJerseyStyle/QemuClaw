@@ -1,4 +1,4 @@
-FROM alpine/openclaw:latest
+FROM ghcr.io/openclaw/openclaw:main
 
 USER root
 
@@ -19,8 +19,23 @@ RUN echo 'node:openclaw' | chpasswd && \
 # 3. Host access: QEMU user-mode networking exposes host at 10.0.2.2.
 #    Add hostname alias so services inside the VM (e.g. OpenClaw) can
 #    reach host-side LLM APIs (Ollama, LM Studio, etc.) via "host.local".
-RUN echo '10.0.2.2 host.local' >> /etc/hosts && \
-    echo 'HOST_IP=10.0.2.2' >> /etc/environment
+#    NOTE: /etc/hosts is read-only during Docker build, so we add the
+#    entry at boot time via a oneshot systemd service instead.
+RUN echo 'HOST_IP=10.0.2.2' >> /etc/environment && \
+    echo '#!/bin/sh\ngrep -q "host.local" /etc/hosts || echo "10.0.2.2 host.local" >> /etc/hosts' \
+      > /usr/local/bin/setup-host-alias.sh && \
+    chmod +x /usr/local/bin/setup-host-alias.sh && \
+    echo '[Unit]\n\
+Description=Add host.local alias for QEMU host access\n\
+Before=openclaw.service\n\
+\n\
+[Service]\n\
+Type=oneshot\n\
+ExecStart=/usr/local/bin/setup-host-alias.sh\n\
+RemainAfterExit=yes\n\
+\n\
+[Install]\n\
+WantedBy=multi-user.target' > /etc/systemd/system/setup-host-alias.service
 
 # 4. Configure OpenClaw systemd service
 #    Wants (not Requires) mnt-shared.mount so OpenClaw still starts
@@ -111,6 +126,7 @@ RUN systemctl enable openclaw.service && \
     systemctl enable nginx.service && \
     systemctl enable mnt-shared.mount && \
     systemctl enable setup-openclaw-config.service && \
+    systemctl enable setup-host-alias.service && \
     systemctl mask getty@tty1.service
 
 # 11. Network configuration
