@@ -26,7 +26,7 @@ One-click isolated deployment for [OpenClaw](https://github.com/alpine/openclaw)
 ### VM Image
 
 <!-- VM_DOWNLOAD:START -->
-[Download OpenClaw VM Image](https://github.com/NewJerseyStyle/QemuClaw/releases) — go to releases page and download the latest `vm-headless-*` release.
+[Download OpenClaw VM Image (vm-headless-21895885037) — multiple split files, see release page](https://github.com/NewJerseyStyle/QemuClaw/releases/tag/vm-headless-21895885037)
 <!-- VM_DOWNLOAD:END -->
 
 ## Install (Desktop App)
