@@ -29,11 +29,12 @@
   <script src="../node_modules/xterm/lib/xterm.js"></script>
   <script src="../node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
   <script src="../node_modules/xterm-addon-web-links/lib/xterm-addon-web-links.js"></script>
+  <script src="../node_modules/xterm-addon-unicode11/lib/xterm-addon-unicode11.js"></script>
   <script>
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 14,
-      fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
+      fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace, 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji'",
       theme: {
         background: '#1e1e1e',
         foreground: '#d4d4d4',
@@ -62,13 +63,42 @@
 
     const fitAddon = new FitAddon.FitAddon();
     const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+    const unicode11Addon = new Unicode11Addon.Unicode11Addon();
 
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
+    term.loadAddon(unicode11Addon);
+    term.unicode.activeVersion = '11';
     term.open(document.getElementById('terminal'));
 
     // Initial fit
     fitAddon.fit();
+
+    // Show loading hints while waiting for connection
+    let connected = false;
+    const hints = [
+      'Waiting for VM serial console to connect...',
+      '',
+      '  \x1b[90mThis may take a few minutes on first boot while the VM',
+      '  initializes. The terminal will appear automatically once ready.\x1b[0m',
+      '',
+      '  \x1b[90mTip: You can check boot progress from the system tray icon.\x1b[0m'
+    ];
+    hints.forEach(line => term.writeln(line));
+    term.writeln('');
+
+    // Animated spinner to show the app isn't frozen
+    const spinnerFrames = ['|', '/', '-', '\\'];
+    let spinnerIdx = 0;
+    const startTime = Date.now();
+    const spinnerInterval = setInterval(() => {
+      if (connected) return;
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const min = Math.floor(elapsed / 60);
+      const sec = String(elapsed % 60).padStart(2, '0');
+      const frame = spinnerFrames[spinnerIdx++ % spinnerFrames.length];
+      term.write(`\r  \x1b[36m${frame}\x1b[0m \x1b[90mElapsed: ${min}:${sec}\x1b[0m\x1b[K`);
+    }, 250);
 
     // Send user keystrokes to main process -> serial console
     term.onData((data) => {
@@ -77,6 +107,11 @@
 
     // Receive serial output from main process -> display in xterm
     window.api.onTerminalData((data) => {
+      if (!connected) {
+        connected = true;
+        clearInterval(spinnerInterval);
+        term.reset();
+      }
       term.write(data);
     });
 

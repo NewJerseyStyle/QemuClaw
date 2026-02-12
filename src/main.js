@@ -2,11 +2,10 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, Notification, shell } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
-const Store = require('electron-store');
 const { VMManager } = require('./vm-manager');
 const { UpdateChecker } = require('./update-checker');
 
-const store = new Store();
+let store;
 let tray = null;
 let vmManager = null;
 let updateChecker = null;
@@ -32,6 +31,9 @@ if (!gotTheLock) {
 }
 
 async function init() {
+  const Store = (await import('electron-store')).default;
+  store = new Store();
+
   const userDataPath = app.getPath('userData');
 
   // Resolve vendor/ path: inside resources when packaged, project root in dev
@@ -190,7 +192,7 @@ function showBootWindow() {
 
   bootWindow = new BrowserWindow({
     width: 440,
-    height: 380,
+    height: 480,
     resizable: false,
     frame: false,
     webPreferences: {
@@ -338,6 +340,14 @@ function showTerminalWindow() {
   });
 
   terminalWindow.loadFile(path.join(__dirname, '../ui/terminal.html'));
+
+  terminalWindow.on('close', (event) => {
+    if (!app.isQuitting) {
+      event.preventDefault();
+      terminalWindow.hide();
+      return;
+    }
+  });
 
   terminalWindow.on('closed', () => {
     terminalWindow = null;
@@ -608,6 +618,7 @@ function showAbout() {
 // ==================== App Lifecycle ====================
 
 app.on('before-quit', async () => {
+  app.isQuitting = true;
   if (vmManager && vmManager.isRunning) {
     await vmManager.stop();
   }

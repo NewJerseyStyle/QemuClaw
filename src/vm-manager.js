@@ -320,7 +320,7 @@ class VMManager {
   }
 
   async restart() {
-    const Store = require('electron-store');
+    const Store = (await import('electron-store')).default;
     const store = new Store();
 
     await this.stop();
@@ -336,8 +336,8 @@ class VMManager {
     shell.openPath(this.logsPath);
   }
 
-  openSharedFolder() {
-    const Store = require('electron-store');
+  async openSharedFolder() {
+    const Store = (await import('electron-store')).default;
     const store = new Store();
     const config = store.get('config');
     if (config && config.sharedFolder) {
