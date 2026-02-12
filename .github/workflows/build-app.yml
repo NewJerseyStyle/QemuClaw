@@ -64,13 +64,12 @@ jobs:
             build_flag: --win
             artifact_glob: |
               dist/QemuClaw-Setup-*.exe
-          # # Skip macos build
-          # - os: macos-latest
-          #   platform: mac
-          #   build_flag: --mac
-          #   artifact_glob: |
-          #     dist/QemuClaw-*.dmg
-          #     dist/QemuClaw-*-mac.zip
+          - os: macos-latest
+            platform: mac
+            build_flag: --mac
+            artifact_glob: |
+              dist/QemuClaw-*.dmg
+              dist/QemuClaw-*-mac.zip
           - os: ubuntu-latest
             platform: linux
             build_flag: --linux
