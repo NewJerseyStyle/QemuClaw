@@ -18,11 +18,11 @@ jobs:
       - name: Get latest OpenClaw Docker image
         id: check
         run: |
-          # 檢查官方鏡像是否有更新（使用社區鏡像）
-          LATEST_DIGEST=$(docker manifest inspect alpine/openclaw:latest | jq -r .config.digest)
+          # Check if official OpenClaw image has been updated
+          LATEST_DIGEST=$(docker manifest inspect ghcr.io/openclaw/openclaw:main | jq -r .config.digest)
           echo "digest=$LATEST_DIGEST" >> $GITHUB_OUTPUT
-          
-          # 檢查是否已經構建過這個版本
+
+          # Check if we already built this version
           if gh release view "vm-${LATEST_DIGEST:7:12}" &>/dev/null; then
             echo "should_build=false" >> $GITHUB_OUTPUT
           else
@@ -52,9 +52,8 @@ jobs:
 
       - name: Pull official OpenClaw image
         run: |
-          # 拉取官方預構建鏡像
-          docker pull alpine/openclaw:latest
-          docker tag alpine/openclaw:latest openclaw:latest
+          docker pull ghcr.io/openclaw/openclaw:main
+          docker tag ghcr.io/openclaw/openclaw:main openclaw:latest
 
       - name: Customize for ${{ matrix.variant }}
         run: |
@@ -168,7 +167,7 @@ jobs:
             1. Download all split files
             2. Extract file: `cat *.tar.gz.* | tar xvfz -`
             3. Start: `qemu-system-x86_64 -drive file=openclaw-${{ matrix.variant }}-compressed.qcow2,format=qcow2`
-            4. Onboard: `cd /app && node dist/index.js onboard`
+            4. Onboard: `cd /app && node openclaw.mjs onboard`
             
             ## Verify
             
