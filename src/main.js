@@ -2,11 +2,10 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, Notification, shell } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
-const Store = require('electron-store');
 const { VMManager } = require('./vm-manager');
 const { UpdateChecker } = require('./update-checker');
 
-const store = new Store();
+let store;
 let tray = null;
 let vmManager = null;
 let updateChecker = null;
@@ -32,6 +31,9 @@ if (!gotTheLock) {
 }
 
 async function init() {
+  const Store = (await import('electron-store')).default;
+  store = new Store();
+
   const userDataPath = app.getPath('userData');
 
   // Resolve vendor/ path: inside resources when packaged, project root in dev

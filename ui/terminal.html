@@ -74,6 +74,32 @@
     // Initial fit
     fitAddon.fit();
 
+    // Show loading hints while waiting for connection
+    let connected = false;
+    const hints = [
+      'Waiting for VM serial console to connect...',
+      '',
+      '  \x1b[90mThis may take a few minutes on first boot while the VM',
+      '  initializes. The terminal will appear automatically once ready.\x1b[0m',
+      '',
+      '  \x1b[90mTip: You can check boot progress from the system tray icon.\x1b[0m'
+    ];
+    hints.forEach(line => term.writeln(line));
+    term.writeln('');
+
+    // Animated spinner to show the app isn't frozen
+    const spinnerFrames = ['|', '/', '-', '\\'];
+    let spinnerIdx = 0;
+    const startTime = Date.now();
+    const spinnerInterval = setInterval(() => {
+      if (connected) return;
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const min = Math.floor(elapsed / 60);
+      const sec = String(elapsed % 60).padStart(2, '0');
+      const frame = spinnerFrames[spinnerIdx++ % spinnerFrames.length];
+      term.write(`\r  \x1b[36m${frame}\x1b[0m \x1b[90mElapsed: ${min}:${sec}\x1b[0m\x1b[K`);
+    }, 250);
+
     // Send user keystrokes to main process -> serial console
     term.onData((data) => {
       window.api.terminalWrite(data);
@@ -81,6 +107,11 @@
 
     // Receive serial output from main process -> display in xterm
     window.api.onTerminalData((data) => {
+      if (!connected) {
+        connected = true;
+        clearInterval(spinnerInterval);
+        term.reset();
+      }
       term.write(data);
     });
 
