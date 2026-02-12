@@ -339,6 +339,14 @@ function showTerminalWindow() {
 
   terminalWindow.loadFile(path.join(__dirname, '../ui/terminal.html'));
 
+  terminalWindow.on('close', (event) => {
+    if (!app.isQuitting) {
+      event.preventDefault();
+      terminalWindow.hide();
+      return;
+    }
+  });
+
   terminalWindow.on('closed', () => {
     terminalWindow = null;
   });
@@ -608,6 +616,7 @@ function showAbout() {
 // ==================== App Lifecycle ====================
 
 app.on('before-quit', async () => {
+  app.isQuitting = true;
   if (vmManager && vmManager.isRunning) {
     await vmManager.stop();
   }
