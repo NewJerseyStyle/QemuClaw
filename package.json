@@ -1,6 +1,6 @@
 {
   "name": "qemuclaw",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "description": "QemuClaw - OpenClaw in isolated water tank",
   "main": "src/main.js",
   "scripts": {
@@ -108,3 +108,4 @@
     }
   }
 }
+
