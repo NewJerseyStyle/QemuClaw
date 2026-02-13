@@ -66,7 +66,7 @@ If you prefer to run QEMU directly:
      -drive file=./openclaw-headless-compressed.qcow2,format=qcow2
    ```
 5. Login with username `node` and password `openclaw`
-6. Run `cd /app && node dist/index.js onboard`
+6. Run `cd /app && node openclaw.mjs onboard`
 
 ## Development
 
