@@ -203,7 +203,7 @@ class VMManager {
     if (!this.terminal.loggedIn) {
       throw new Error('Terminal not logged in');
     }
-    await this.terminal.exec('cd /app && node openclaw.mjs onboard');
+    await this.terminal.exec('cd /app && node dist/index.js onboard');
   }
 
   /**
@@ -214,7 +214,7 @@ class VMManager {
     if (!this.terminal.loggedIn) {
       throw new Error('Terminal not logged in');
     }
-    await this.terminal.exec('cd /app && node openclaw.mjs update');
+    await this.terminal.exec('cd /app && node dist/index.js update');
   }
 
   async waitForOpenClaw(timeout = 120000) {

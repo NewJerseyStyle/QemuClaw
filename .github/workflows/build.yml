@@ -18,8 +18,8 @@ jobs:
       - name: Get latest OpenClaw Docker image
         id: check
         run: |
-          # Check if official OpenClaw image has been updated
-          LATEST_DIGEST=$(docker manifest inspect ghcr.io/openclaw/openclaw:main | jq -r .config.digest)
+          # Check if community OpenClaw image has been updated
+          LATEST_DIGEST=$(docker manifest inspect alpine/openclaw:latest | jq -r .config.digest)
           echo "digest=$LATEST_DIGEST" >> $GITHUB_OUTPUT
 
           # Check if we already built this version
@@ -50,10 +50,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-utils
 
-      - name: Pull official OpenClaw image
+      - name: Pull community OpenClaw image
         run: |
-          docker pull ghcr.io/openclaw/openclaw:main
-          docker tag ghcr.io/openclaw/openclaw:main openclaw:latest
+          docker pull alpine/openclaw:latest
+          docker tag alpine/openclaw:latest openclaw:latest
 
       - name: Customize for ${{ matrix.variant }}
         run: |
@@ -168,7 +168,7 @@ jobs:
             1. Download all split files
             2. Extract file: `cat *.tar.gz.* | tar xvfz -`
             3. Start: `qemu-system-x86_64 -drive file=openclaw-${{ matrix.variant }}-compressed.qcow2,format=qcow2`
-            4. Onboard: `cd /app && node openclaw.mjs onboard`
+            4. Onboard: `cd /app && node dist/index.js onboard`
             
             ## Verify
             

@@ -66,7 +66,7 @@ If you prefer to run QEMU directly:
      -drive file=./openclaw-headless-compressed.qcow2,format=qcow2
    ```
 5. Login with username `node` and password `openclaw`
-6. Run `cd /app && node openclaw.mjs onboard`
+6. Run `cd /app && node dist/index.js onboard`
 
 ## Development
 
@@ -121,7 +121,7 @@ MIT
 ## Acknowledgements
 - 🙏 Thank you to [Arthur](https://github.com/imitation-alpha) for valuable support and assistance.
 - 🙌 Thanks [Hong Kong School of AI ⓕ](https://www.facebook.com/hkschoolofai/) for getting this project off to a strong start.
-- 💖 Grateful to [OpenClaw](https://github.com/openclaw/openclaw) for the impressive personal AI assistant and Docker image.
+- 💖 Grateful to [OpenClaw](https://github.com/openclaw/openclaw) for the impressive personal AI assistant.
 - 🌟 Thanks to the Alpine Community for providing a [handy Docker image](https://hub.docker.com/r/alpine/openclaw).
 - 🤗 Appreciation to [QEMU](https://github.com/qemu/qemu) for the amazing virtualization technology.
 - 👉 A nod to [7-zip](https://7-zip.org/) for a powerful utility.
