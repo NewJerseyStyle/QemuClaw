@@ -17,16 +17,16 @@ One-click isolated deployment for [OpenClaw](https://github.com/alpine/openclaw)
 <!-- APP_DOWNLOAD:START -->
 | Platform | Download |
 |----------|----------|
-| Windows | [QemuClaw-Setup-1.0.0.exe](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.0/QemuClaw-Setup-1.0.0.exe) (includes QEMU + 7-Zip) |
-| macOS | [QemuClaw-1.0.0.dmg](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.0/QemuClaw-1.0.0.dmg) |
-| Linux | [QemuClaw-1.0.0-linux.AppImage](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.0/QemuClaw-1.0.0-linux.AppImage) |
-| Linux (deb) | [QemuClaw-1.0.0-linux.deb](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.0/QemuClaw-1.0.0-linux.deb) |
+| Windows | [QemuClaw-Setup-1.0.2.exe](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.2/QemuClaw-Setup-1.0.2.exe) (includes QEMU + 7-Zip) |
+| macOS | [QemuClaw-1.0.2.dmg](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.2/QemuClaw-1.0.2.dmg) |
+| Linux | [QemuClaw-1.0.2-linux.AppImage](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.2/QemuClaw-1.0.2-linux.AppImage) |
+| Linux (deb) | [QemuClaw-1.0.2-linux.deb](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.2/QemuClaw-1.0.2-linux.deb) |
 <!-- APP_DOWNLOAD:END -->
 
 ### VM Image
 
 <!-- VM_DOWNLOAD:START -->
-[Download OpenClaw VM Image (vm-headless-21895885037) — multiple split files, see release page](https://github.com/NewJerseyStyle/QemuClaw/releases/tag/vm-headless-21895885037)
+[Download OpenClaw VM Image (vm-headless-21933235630) — multiple split files, see release page](https://github.com/NewJerseyStyle/QemuClaw/releases/tag/vm-headless-21933235630)
 <!-- VM_DOWNLOAD:END -->
 
 <img width="500" height="220" alt="image" src="https://github.com/user-attachments/assets/d3c5394e-bf6a-48fe-8044-d663e3b75908" />
