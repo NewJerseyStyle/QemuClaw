@@ -17,16 +17,16 @@ One-click isolated deployment for [OpenClaw](https://github.com/alpine/openclaw)
 <!-- APP_DOWNLOAD:START -->
 | Platform | Download |
 |----------|----------|
-| Windows | [QemuClaw-Setup-2.0.0.exe](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v2.0.0/QemuClaw-Setup-2.0.0.exe) (includes QEMU + 7-Zip) |
-| macOS | [QemuClaw-2.0.0.dmg](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v2.0.0/QemuClaw-2.0.0.dmg) |
-| Linux | [QemuClaw-2.0.0-linux.AppImage](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v2.0.0/QemuClaw-2.0.0-linux.AppImage) |
-| Linux (deb) | [QemuClaw-2.0.0-linux.deb](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v2.0.0/QemuClaw-2.0.0-linux.deb) |
+| Windows | [QemuClaw-Setup-1.0.2.exe](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.2/QemuClaw-Setup-1.0.2.exe) (includes QEMU + 7-Zip) |
+| macOS | [QemuClaw-1.0.2.dmg](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.2/QemuClaw-1.0.2.dmg) |
+| Linux | [QemuClaw-1.0.2-linux.AppImage](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.2/QemuClaw-1.0.2-linux.AppImage) |
+| Linux (deb) | [QemuClaw-1.0.2-linux.deb](https://github.com/NewJerseyStyle/QemuClaw/releases/download/app-v1.0.2/QemuClaw-1.0.2-linux.deb) |
 <!-- APP_DOWNLOAD:END -->
 
 ### VM Image
 
 <!-- VM_DOWNLOAD:START -->
-[Download OpenClaw VM Image (vm-headless-21974983125) — multiple split files, see release page](https://github.com/NewJerseyStyle/QemuClaw/releases/tag/vm-headless-21974983125)
+[Download OpenClaw VM Image (vm-headless-21933235630) — multiple split files, see release page](https://github.com/NewJerseyStyle/QemuClaw/releases/tag/vm-headless-21933235630)
 <!-- VM_DOWNLOAD:END -->
 
 <img width="500" height="220" alt="image" src="https://github.com/user-attachments/assets/d3c5394e-bf6a-48fe-8044-d663e3b75908" />
@@ -66,7 +66,7 @@ If you prefer to run QEMU directly:
      -drive file=./openclaw-headless-compressed.qcow2,format=qcow2
    ```
 5. Login with username `node` and password `openclaw`
-6. Run `cd /app && node openclaw.mjs onboard`
+6. Run `cd /app && node dist/index.js onboard`
 
 ## Development
 
@@ -121,7 +121,7 @@ MIT
 ## Acknowledgements
 - 🙏 Thank you to [Arthur](https://github.com/imitation-alpha) for valuable support and assistance.
 - 🙌 Thanks [Hong Kong School of AI ⓕ](https://www.facebook.com/hkschoolofai/) for getting this project off to a strong start.
-- 💖 Grateful to [OpenClaw](https://github.com/openclaw/openclaw) for the impressive personal AI assistant and Docker image.
+- 💖 Grateful to [OpenClaw](https://github.com/openclaw/openclaw) for the impressive personal AI assistant.
 - 🌟 Thanks to the Alpine Community for providing a [handy Docker image](https://hub.docker.com/r/alpine/openclaw).
 - 🤗 Appreciation to [QEMU](https://github.com/qemu/qemu) for the amazing virtualization technology.
 - 👉 A nod to [7-zip](https://7-zip.org/) for a powerful utility.
