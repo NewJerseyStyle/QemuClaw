@@ -141,6 +141,7 @@ jobs:
         with:
           name: openclaw-vm-${{ matrix.variant }}
           path: dist/
+          retention-days: 3
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -237,3 +238,4 @@ jobs:
             echo "✗ Some builds failed"
             exit 1
           fi
+
