@@ -26,7 +26,7 @@ One-click isolated deployment for [OpenClaw](https://github.com/alpine/openclaw)
 ### VM Image
 
 <!-- VM_DOWNLOAD:START -->
-[Download OpenClaw VM Image (vm-headless-21933235630) — multiple split files, see release page](https://github.com/NewJerseyStyle/QemuClaw/releases/tag/vm-headless-21933235630)
+[Download OpenClaw VM Image (vm-headless-21974983125) — multiple split files, see release page](https://github.com/NewJerseyStyle/QemuClaw/releases/tag/vm-headless-21974983125)
 <!-- VM_DOWNLOAD:END -->
 
 <img width="500" height="220" alt="image" src="https://github.com/user-attachments/assets/d3c5394e-bf6a-48fe-8044-d663e3b75908" />
