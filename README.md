@@ -37,7 +37,13 @@ One-click isolated deployment for [OpenClaw](https://github.com/alpine/openclaw)
 
 **macOS:** Install QEMU first (`brew install qemu`), then open the `.dmg`.
 
-**Linux:** Install QEMU first (`sudo apt install qemu-system-x86`), then run the `.AppImage` or install the `.deb`.
+**Linux (quick install):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/NewJerseyStyle/QemuClaw/main/install.sh | bash
+```
+This installs QEMU and all dependencies automatically, then downloads and installs the latest `.deb` package.
+
+Alternatively, install QEMU manually (`sudo apt install qemu-system-x86`) and run the `.AppImage` or install the `.deb`.
 
 On first launch, the app will:
 1. Ask you to locate QEMU if it's not bundled or found automatically

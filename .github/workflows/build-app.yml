@@ -200,7 +200,11 @@ jobs:
 
             **macOS:** Install QEMU first: `brew install qemu`, then open the `.dmg`.
 
-            **Linux:** Install QEMU first: `sudo apt install qemu-system-x86`, then run the `.AppImage` or install the `.deb`.
+            **Linux (quick install):**
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/NewJerseyStyle/QemuClaw/main/install.sh | bash
+            ```
+            Or manually: install QEMU first (`sudo apt install qemu-system-x86`), then run the `.AppImage` or install the `.deb`.
           draft: false
           prerelease: false
         env:
