@@ -80,6 +80,8 @@ If you prefer to run QEMU directly:
 git clone https://github.com/NewJerseyStyle/QemuClaw.git
 cd QemuClaw
 npm install
+# cd copilot-ui && npm install && npm run build   # Build the chat UI
+# cd ..
 npm start
 ```
 
