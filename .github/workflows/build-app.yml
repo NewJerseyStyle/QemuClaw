@@ -192,7 +192,6 @@ jobs:
             | Windows | `QemuClaw-Setup-${{ needs.version.outputs.version }}.exe` | Includes bundled QEMU and 7-Zip |
             | macOS | `QemuClaw-${{ needs.version.outputs.version }}.dmg` | Requires QEMU via `brew install qemu` |
             | Linux | `QemuClaw-${{ needs.version.outputs.version }}-linux.AppImage` | Requires QEMU via `apt install qemu-system-x86` |
-            | Linux (deb) | `QemuClaw-${{ needs.version.outputs.version }}-linux.deb` | Requires QEMU via `apt install qemu-system-x86` |
 
             ## Install
 
@@ -227,8 +226,7 @@ jobs:
           BLOCK+="|----------|----------|\n"
           BLOCK+="| Windows | [QemuClaw-Setup-${VER}.exe](${WIN_URL}) (includes QEMU + 7-Zip) |\n"
           BLOCK+="| macOS | [QemuClaw-${VER}.dmg](${MAC_URL}) |\n"
-          BLOCK+="| Linux | [QemuClaw-${VER}-linux.AppImage](${LINUX_URL}) |\n"
-          BLOCK+="| Linux (deb) | [QemuClaw-${VER}-linux.deb](${DEB_URL}) |"
+          BLOCK+="| Linux (installer) | `curl -fsSL https://raw.githubusercontent.com/NewJerseyStyle/QemuClaw/main/install.sh | bash` |"
 
           # Replace content between APP_DOWNLOAD markers
           sed -i "/<!-- APP_DOWNLOAD:START -->/,/<!-- APP_DOWNLOAD:END -->/{
