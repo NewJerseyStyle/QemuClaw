@@ -155,7 +155,7 @@ class VMManager {
 
   buildQEMUArgs(config, vmImage) {
     // Build user-net string with port forwarding (and SMB on Windows if shared folder set)
-    let userNet = 'user,hostfwd=tcp::18789-:18789,hostfwd=tcp::18790-:18790';
+    let userNet = 'user,hostfwd=tcp::18789-:18789,hostfwd=tcp::18790-:18790,hostfwd=tcp::18791-:18791';
     if (config.sharedFolder && process.platform === 'win32') {
       // virtfs/9p has no Windows host support.
       // QEMU user-mode SMB: VM accesses the folder at \\10.0.2.4\qemu
@@ -366,6 +366,108 @@ class VMManager {
       port++;
     }
     throw new Error('No free port found');
+  }
+
+  async transferCredentials(apiKey, baseUrl) {
+    if (!this.terminal.loggedIn) {
+      throw new Error('Terminal not logged in');
+    }
+    // Escape double quotes and backslashes for safe shell insertion
+    const safeKey = apiKey.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const safeUrl = baseUrl.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    await this.terminal.execAndWait(
+      `mkdir -p /home/node/.config/openclaw && printf '{"apiKey":"${safeKey}","baseUrl":"${safeUrl}"}' > /home/node/.config/openclaw/credentials.json && chmod 600 /home/node/.config/openclaw/credentials.json`,
+      'CREDS_STORED'
+    );
+  }
+
+  async setupCopilotKit(serverScriptContent) {
+    // 1. Start a temporary HTTP server to serve the script
+    const tempServer = await new Promise((resolve) => {
+      const srv = http.createServer((req, res) => {
+        if (req.url === '/server.js') {
+          res.writeHead(200, { 'Content-Type': 'application/javascript' });
+          res.end(serverScriptContent);
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+      srv.listen(0, () => {
+        resolve(srv);
+      });
+    });
+    const tempPort = tempServer.address().port;
+
+    try {
+      // 2. Download the script inside the VM
+      await this.terminal.execAndWait(
+        `mkdir -p /home/node/copilot-runtime && wget -q http://10.0.2.2:${tempPort}/server.js -O /home/node/copilot-runtime/server.js`,
+        'SCRIPT_DOWNLOADED'
+      );
+    } finally {
+      tempServer.close();
+    }
+
+    // 3. Install npm packages
+    await this.terminal.execAndWait(
+      'cd /home/node/copilot-runtime && npm install --save @copilotkit/runtime express openai',
+      'COPILOTKIT_INSTALLED',
+      180000
+    );
+
+    // 4. Start the server
+    await this.terminal.execAndWait(
+      'node /home/node/copilot-runtime/server.js &',
+      'COPILOTKIT_STARTED',
+      30000
+    );
+  }
+
+  async startCopilotKitServer() {
+    await this.terminal.execAndWait(
+      'node /home/node/copilot-runtime/server.js &',
+      'COPILOTKIT_STARTED',
+      15000
+    );
+  }
+
+  async waitForCopilotKit(timeout = 60000) {
+    const startTime = Date.now();
+    console.log('Waiting for CopilotKit on port 18791...');
+
+    return new Promise((resolve, reject) => {
+      const checkInterval = setInterval(async () => {
+        if (Date.now() - startTime > timeout) {
+          clearInterval(checkInterval);
+          reject(new Error('CopilotKit startup timeout'));
+          return;
+        }
+
+        try {
+          await new Promise((res, rej) => {
+            const req = http.get('http://localhost:18791/health', (response) => {
+              let data = '';
+              response.on('data', chunk => data += chunk);
+              response.on('end', () => {
+                if (response.statusCode === 200) {
+                  res();
+                } else {
+                  rej(new Error('Not ready'));
+                }
+              });
+            });
+            req.on('error', rej);
+            req.setTimeout(3000, () => { req.destroy(); rej(new Error('timeout')); });
+          });
+          console.log('CopilotKit is ready!');
+          clearInterval(checkInterval);
+          resolve();
+        } catch (error) {
+          // Keep waiting
+        }
+      }, 2000);
+    });
   }
 
   getStatus() {

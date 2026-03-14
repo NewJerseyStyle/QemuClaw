@@ -199,6 +199,24 @@ class TerminalManager extends EventEmitter {
     }
   }
 
+  async execAndWait(command, sentinel, timeout = 120000) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.off('data', onData);
+        reject(new Error(`execAndWait timed out waiting for: ${sentinel}`));
+      }, timeout);
+      const onData = (data) => {
+        if (data.includes(sentinel)) {
+          clearTimeout(timer);
+          this.off('data', onData);
+          resolve();
+        }
+      };
+      this.on('data', onData);
+      this.socket.write(`${command} && echo "${sentinel}"\r\n`);
+    });
+  }
+
   disconnect() {
     this.connected = false;
     this.loggedIn = false;

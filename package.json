@@ -1,11 +1,13 @@
 {
   "name": "qemuclaw",
-  "version": "1.0.3",
+  "version": "1.0.2",
   "description": "QemuClaw - OpenClaw in isolated water tank",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --debug",
+    "build:copilot": "cd copilot-ui && npm install && npm run build",
+    "build:all": "npm run build:copilot && npm run build",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",

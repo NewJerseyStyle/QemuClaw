@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('api', {
   // Boot status
   onBootStatus: (cb) => ipcRenderer.on('boot-status', (event, data) => cb(data)),
 
+  // Copilot
+  notifyOnboardingComplete: () => ipcRenderer.send('onboarding-complete'),
+
   // Cleanup
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)
 });

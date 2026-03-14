@@ -13,6 +13,8 @@ let setupWindow = null;
 let terminalWindow = null;
 let downloadWindow = null;
 let bootWindow = null;
+let copilotWindow = null;
+let pendingApiKey = null; // RAM only — never written to disk
 
 // Single-instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -21,7 +23,10 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (terminalWindow && terminalWindow.isVisible()) {
+    if (copilotWindow && !copilotWindow.isDestroyed()) {
+      if (copilotWindow.isMinimized()) copilotWindow.restore();
+      copilotWindow.focus();
+    } else if (terminalWindow && terminalWindow.isVisible()) {
       if (terminalWindow.isMinimized()) terminalWindow.restore();
       terminalWindow.focus();
     }
@@ -113,7 +118,10 @@ async function showSetupWizard() {
   setupWindow.loadFile(path.join(__dirname, '../ui/setup.html'));
 
   ipcMain.once('setup-complete', async (event, config) => {
-    store.set('config', config);
+    pendingApiKey = config.llmApiKey;
+    const storeConfig = { ...config };
+    delete storeConfig.llmApiKey; // Strip key before persisting
+    store.set('config', storeConfig);
     setupWindow.close();
     setupWindow = null;
 
@@ -259,22 +267,29 @@ async function startApp() {
     vmManager.terminal.removeListener('login-status', onLoginStatus);
 
     if (isFirstRun) {
-      // First run: launch onboarding in terminal
-      sendBootStatus('done', 'Ready');
-      closeBootWindow();
+      // First run: set up CopilotKit and show chat UI
+      sendBootStatus('copilot', 'Setting up AI assistant...');
 
-      await vmManager.runOnboarding();
-      showTerminalWindow();
+      const serverScript = fs.readFileSync(
+        path.join(__dirname, 'copilot-server.js'), 'utf8'
+      );
+      await vmManager.transferCredentials(pendingApiKey, config.llmBaseUrl || 'https://api.openai.com/v1');
+      pendingApiKey = null; // Clear from RAM
+
+      await vmManager.setupCopilotKit(serverScript);
+      await vmManager.waitForCopilotKit();
+
+      sendBootStatus('openclaw', 'Waiting for OpenClaw service...');
+      showCopilotWindow();
 
       new Notification({
         title: 'OpenClaw VM',
-        body: 'Complete the setup in the terminal window.'
+        body: 'AI assistant is ready! Complete setup in the chat window.'
       }).show();
 
       // Wait for OpenClaw to come up after onboarding
       try {
         await vmManager.waitForOpenClaw();
-        store.set('onboardingComplete', true);
         updateTrayMenu();
 
         new Notification({
@@ -284,14 +299,21 @@ async function startApp() {
       } catch (err) {
         console.log('OpenClaw not detected yet - user may still be onboarding.');
       }
-    } else {
-      // Normal start: wait for OpenClaw, then notify
-      sendBootStatus('openclaw', 'Waiting for OpenClaw service...');
 
+      sendBootStatus('done', 'Ready');
+      closeBootWindow();
+    } else {
+      // Normal start: restart CopilotKit server and wait for services
+      sendBootStatus('copilot', 'Starting AI assistant...');
+      await vmManager.startCopilotKitServer();
+      await vmManager.waitForCopilotKit();
+
+      sendBootStatus('openclaw', 'Waiting for OpenClaw service...');
       await vmManager.waitForOpenClaw();
 
       sendBootStatus('done', 'Ready');
       closeBootWindow();
+      showCopilotWindow();
 
       new Notification({
         title: 'OpenClaw VM',
@@ -354,6 +376,42 @@ function showTerminalWindow() {
   });
 }
 
+// ==================== Copilot Window ====================
+
+function showCopilotWindow() {
+  if (copilotWindow && !copilotWindow.isDestroyed()) {
+    copilotWindow.show();
+    copilotWindow.focus();
+    return;
+  }
+
+  copilotWindow = new BrowserWindow({
+    width: 480,
+    height: 700,
+    title: 'OpenClaw Assistant',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  const distPath = path.join(__dirname, '../ui/copilot-dist/index.html');
+  copilotWindow.loadFile(distPath);
+
+  copilotWindow.on('close', (e) => {
+    if (!app.isQuitting) {
+      e.preventDefault();
+      copilotWindow.hide();
+    }
+  });
+
+  copilotWindow.on('closed', () => {
+    copilotWindow = null;
+  });
+}
+
 // ==================== System Tray ====================
 
 function createTray() {
@@ -399,13 +457,31 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Open Web UI',
-      enabled: isRunning,
-      click: () => vmManager.openBrowser()
+      label: 'Open Assistant',
+      click: () => showCopilotWindow()
     },
+    { type: 'separator' },
     {
-      label: 'Open Terminal',
-      click: () => showTerminalWindow()
+      label: 'Power User',
+      submenu: [
+        {
+          label: 'Open Terminal',
+          click: () => showTerminalWindow()
+        },
+        {
+          label: 'Open Web UI',
+          enabled: isRunning,
+          click: () => vmManager.openBrowser()
+        },
+        {
+          label: 'View Logs',
+          click: () => vmManager.openLogs()
+        },
+        {
+          label: 'Open Shared Folder',
+          click: () => vmManager.openSharedFolder()
+        }
+      ]
     },
     { type: 'separator' },
     {
@@ -441,6 +517,10 @@ function updateTrayMenu() {
 
           vmManager.terminal.removeListener('login-status', onLoginStatus);
 
+          sendBootStatus('copilot', 'Starting AI assistant...');
+          await vmManager.startCopilotKitServer();
+          await vmManager.waitForCopilotKit();
+
           sendBootStatus('openclaw', 'Waiting for OpenClaw service...');
           await vmManager.waitForOpenClaw();
 
@@ -458,14 +538,6 @@ function updateTrayMenu() {
           dialog.showErrorBox('Restart Failed', error.message);
         }
       }
-    },
-    {
-      label: 'View Logs',
-      click: () => vmManager.openLogs()
-    },
-    {
-      label: 'Open Shared Folder',
-      click: () => vmManager.openSharedFolder()
     },
     { type: 'separator' },
     {
@@ -551,6 +623,12 @@ function setupIPC() {
     return { isRunning: false };
   });
 
+  // Onboarding complete
+  ipcMain.on('onboarding-complete', () => {
+    store.set('onboardingComplete', true);
+    updateTrayMenu();
+  });
+
   // Folder selection
   ipcMain.handle('select-folder', async () => {
     const result = await dialog.showOpenDialog({
@@ -589,11 +667,23 @@ function showSettings() {
 
   ipcMain.once('setup-complete', async (event, newConfig) => {
     const oldConfig = store.get('config');
-    store.set('config', newConfig);
 
-    if (oldConfig.memory !== newConfig.memory ||
-        oldConfig.cpus !== newConfig.cpus ||
-        oldConfig.sharedFolder !== newConfig.sharedFolder) {
+    // Handle API key: transfer to VM if provided, never persist to host
+    if (newConfig.llmApiKey) {
+      try {
+        await vmManager.transferCredentials(newConfig.llmApiKey, newConfig.llmBaseUrl || oldConfig.llmBaseUrl);
+      } catch (error) {
+        dialog.showErrorBox('Credential Update Failed', error.message);
+      }
+    }
+
+    const storeConfig = { ...newConfig };
+    delete storeConfig.llmApiKey; // Strip key before persisting
+    store.set('config', storeConfig);
+
+    if (oldConfig.memory !== storeConfig.memory ||
+        oldConfig.cpus !== storeConfig.cpus ||
+        oldConfig.sharedFolder !== storeConfig.sharedFolder) {
       try {
         await vmManager.restart();
         updateTrayMenu();
