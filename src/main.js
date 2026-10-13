@@ -1,5 +1,5 @@
 // src/main.js - Electron entry point: tray, terminal window, IPC
-const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, Notification, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, Notification, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
 const { VMManager } = require('./vm-manager');
@@ -38,6 +38,16 @@ if (!gotTheLock) {
 async function init() {
   const Store = (await import('electron-store')).default;
   store = new Store();
+
+  // Enforce a strict Content Security Policy on all windows to mitigate XSS
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'"]
+      }
+    });
+  });
 
   const userDataPath = app.getPath('userData');
 
