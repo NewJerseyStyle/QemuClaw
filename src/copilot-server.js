@@ -7,13 +7,26 @@ const { execSync } = require('child_process');
 
 const CREDS_PATH = '/home/node/.config/openclaw/credentials.json';
 
-// Read credentials stored by the host during setup
+// Prefer credentials injected via environment (not persisted on disk).
+// Fall back to the on-disk file only when env vars are not set, and
+// require that the file is readable only by its owner before trusting it.
 let credentials;
-try {
-  credentials = JSON.parse(fs.readFileSync(CREDS_PATH, 'utf8'));
-} catch (err) {
-  console.error('Failed to read credentials:', err.message);
-  process.exit(1);
+if (process.env.OPENAI_API_KEY) {
+  credentials = {
+    apiKey: process.env.OPENAI_API_KEY,
+    baseUrl: process.env.OPENAI_BASE_URL
+  };
+} else {
+  try {
+    const mode = fs.statSync(CREDS_PATH).mode & 0o077;
+    if (mode !== 0) {
+      throw new Error(`${CREDS_PATH} must not be readable/writable by group or others (mode too permissive)`);
+    }
+    credentials = JSON.parse(fs.readFileSync(CREDS_PATH, 'utf8'));
+  } catch (err) {
+    console.error('Failed to read credentials:', err.message);
+    process.exit(1);
+  }
 }
 
 const adapter = new OpenAIAdapter({
